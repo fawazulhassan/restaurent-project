@@ -116,6 +116,30 @@
           "available": true
         }
       ]
+    },
+    {
+      "name": "Test",
+      "items": [
+        {
+          "id": "test-unavailable-item",
+          "name": "Test Unavailable Item",
+          "name_urdu": "ٹیسٹ آئٹم",
+          "price_pkr": 100,
+          "available": false
+        }
+      ]
+    },
+    {
+      "name": "Test",
+      "items": [
+        {
+          "id": "test-unavailable-item",
+          "name": "Test Unavailable Item",
+          "name_urdu": "ٹیسٹ آئٹم",
+          "price_pkr": 100,
+          "available": false
+        }
+      ]
     }
   ]
 }
