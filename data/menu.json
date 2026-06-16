@@ -1,0 +1,121 @@
+{
+  "restaurant_name": "Kasur Kitchen",
+  "categories": [
+    {
+      "name": "Karahi",
+      "items": [
+        {
+          "id": "chicken-karahi",
+          "name": "Chicken Karahi",
+          "name_urdu": "چکن کڑاہی",
+          "sizes": [
+            { "id": "half", "label": "Half", "price_pkr": 800 },
+            { "id": "full", "label": "Full", "price_pkr": 1400 }
+          ],
+          "available": true
+        },
+        {
+          "id": "mutton-karahi",
+          "name": "Mutton Karahi",
+          "name_urdu": "مٹن کڑاہی",
+          "sizes": [
+            { "id": "half", "label": "Half", "price_pkr": 1200 },
+            { "id": "full", "label": "Full", "price_pkr": 2200 }
+          ],
+          "available": true
+        }
+      ]
+    },
+    {
+      "name": "Biryani",
+      "items": [
+        {
+          "id": "chicken-biryani",
+          "name": "Chicken Biryani",
+          "name_urdu": "چکن بریانی",
+          "sizes": [
+            { "id": "single", "label": "Single", "price_pkr": 350 },
+            { "id": "family", "label": "Family", "price_pkr": 1200 }
+          ],
+          "available": true
+        },
+        {
+          "id": "beef-biryani",
+          "name": "Beef Biryani",
+          "name_urdu": "بیف بریانی",
+          "sizes": [
+            { "id": "single", "label": "Single", "price_pkr": 400 },
+            { "id": "family", "label": "Family", "price_pkr": 1400 }
+          ],
+          "available": true
+        }
+      ]
+    },
+    {
+      "name": "Pizza",
+      "items": [
+        {
+          "id": "chicken-tikka-pizza",
+          "name": "Chicken Tikka Pizza",
+          "name_urdu": "چکن ٹکہ پیزا",
+          "sizes": [
+            { "id": "small", "label": "Small", "price_pkr": 800 },
+            { "id": "large", "label": "Large", "price_pkr": 1400 }
+          ],
+          "available": true
+        },
+        {
+          "id": "margherita-pizza",
+          "name": "Margherita Pizza",
+          "name_urdu": "مارگیریٹا پیزا",
+          "sizes": [
+            { "id": "small", "label": "Small", "price_pkr": 700 },
+            { "id": "large", "label": "Large", "price_pkr": 1200 }
+          ],
+          "available": true
+        }
+      ]
+    },
+    {
+      "name": "Naan",
+      "items": [
+        {
+          "id": "plain-naan",
+          "name": "Plain Naan",
+          "name_urdu": "سادہ نان",
+          "price_pkr": 50,
+          "available": true
+        },
+        {
+          "id": "garlic-naan",
+          "name": "Garlic Naan",
+          "name_urdu": "لہسن نان",
+          "price_pkr": 80,
+          "available": true
+        }
+      ]
+    },
+    {
+      "name": "Drinks",
+      "items": [
+        {
+          "id": "coke-1-5l",
+          "name": "1.5L Coke",
+          "name_urdu": "1.5 لیٹر کوک",
+          "price_pkr": 200,
+          "available": true
+        },
+        {
+          "id": "mint-margarita",
+          "name": "Mint Margarita",
+          "name_urdu": "پودینہ مارگیریٹا",
+          "sizes": [
+            { "id": "regular", "label": "Regular", "price_pkr": 250 },
+            { "id": "large", "label": "Large", "price_pkr": 350 }
+          ],
+          "available": true
+        }
+      ]
+    }
+  ]
+}
