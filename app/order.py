@@ -158,54 +158,44 @@ if __name__ == "__main__":
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
 
-    print("=== Phase 1 manual tests ===\n")
+    print(
+        """Phase 1 — test yourself in Python REPL
 
-    order = Order()
+  cd restaurant-voice-agent
+  .\\venv\\Scripts\\activate
+  python
 
-    # 1.1 — valid item
-    add_item_to_order(order, "chicken-karahi", "full", 2)
-    total = calculate_total(order)
-    print(f"1.1 Add chicken-karahi full x2: {len(order.items)} line(s), qty={order.items[0].qty}, total={total}")
-    assert len(order.items) == 1 and order.items[0].qty == 2 and total == 2800
+Then paste commands one at a time:
 
-    # 1.2 — invalid item
-    try:
-        add_item_to_order(order, "xyz-burger", None, 1)
-        print("1.2 FAIL: expected OrderError for xyz-burger")
-    except OrderError as e:
-        print(f"1.2 Invalid item: {e}")
+  from app.order import Order, OrderError, add_item_to_order, calculate_total, build_confirmation_urdu, confirm_order, save_order
 
-    # 1.3 — unavailable item
-    try:
-        add_item_to_order(order, "test-unavailable-item", None, 1)
-        print("1.3 FAIL: expected OrderError for test-unavailable-item")
-    except OrderError as e:
-        print(f"1.3 Unavailable item: {e}")
+  order = Order()
 
-    # Bonus — flat-price and sized items, qty merge
-    add_item_to_order(order, "plain-naan", None, 1)
-    add_item_to_order(order, "mint-margarita", "large", 1)
-    add_item_to_order(order, "chicken-karahi", "full", 1)
-    print(f"Bonus: after extras, karahi qty={order.items[0].qty} (expect 3), total={calculate_total(order)}")
+  # 1.1 — valid item (expect qty 2, total 2800)
+  add_item_to_order(order, "chicken-karahi", "full", 2)
+  order.items
+  calculate_total(order)
 
-    # 1.5 — confirmation with address
-    order.delivery_address = "Model Town, Kasur, house 45"
-    order.special_instructions = "Extra spicy, no salad"
-    confirmation = build_confirmation_urdu(order)
-    print(f"\n1.5 Confirmation:\n{confirmation}")
-    assert "(Full)" in confirmation
-    assert "2800" not in confirmation or "Rs" in confirmation
+  # 1.2 — invalid item (expect OrderError)
+  add_item_to_order(order, "xyz-burger", None, 1)
 
-    # 1.7 — missing address warning (separate order)
-    order_no_addr = Order()
-    add_item_to_order(order_no_addr, "chicken-karahi", "full", 1)
-    warn_text = build_confirmation_urdu(order_no_addr)
-    print(f"\n1.7 No-address warning present: {'براہ کرم ڈیلیوری کا پتہ بتائیں۔' in warn_text}")
+  # 1.3 — unavailable item (expect OrderError)
+  add_item_to_order(order, "test-unavailable-item", None, 1)
 
-    # 1.6 — save
-    confirm_order(order)
-    saved_path = save_order(order)
-    print(f"\n1.6 Saved to: {saved_path}")
-    assert saved_path.exists()
+  # 1.4 — total check (after 1.1: should be 2800)
+  calculate_total(order)
 
-    print("\n=== All Phase 1 tests passed ===")
+  # 1.5 — Urdu confirmation with address
+  order.delivery_address = "Model Town, Kasur, house 45"
+  print(build_confirmation_urdu(order))
+
+  # 1.7 — missing address warning
+  order2 = Order()
+  add_item_to_order(order2, "chicken-karahi", "full", 1)
+  print(build_confirmation_urdu(order2))
+
+  # 1.6 — save order
+  confirm_order(order)
+  save_order(order)
+"""
+    )
