@@ -1,0 +1,26 @@
+{
+  "items": [
+    {
+      "id": "chicken-karahi",
+      "size": "full",
+      "qty": 2,
+      "name": "Chicken Karahi",
+      "name_urdu": "چکن کڑاہی",
+      "size_label": "Full",
+      "unit_price_pkr": 1400
+    },
+    {
+      "id": "chicken-tikka-pizza",
+      "size": "large",
+      "qty": 1,
+      "name": "Chicken Tikka Pizza",
+      "name_urdu": "چکن ٹکہ پیزا",
+      "size_label": "Large",
+      "unit_price_pkr": 1400
+    }
+  ],
+  "delivery_address": "Model Town Kasur house 45",
+  "special_instructions": "extra cheese",
+  "customer_phone": null,
+  "status": "confirmed"
+}

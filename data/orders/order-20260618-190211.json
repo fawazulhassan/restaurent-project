@@ -1,0 +1,17 @@
+{
+  "items": [
+    {
+      "id": "mutton-karahi",
+      "size": "half",
+      "qty": 3,
+      "name": "Mutton Karahi",
+      "name_urdu": "مٹن کڑاہی",
+      "size_label": "Half",
+      "unit_price_pkr": 1200
+    }
+  ],
+  "delivery_address": "Kasur",
+  "special_instructions": null,
+  "customer_phone": null,
+  "status": "confirmed"
+}

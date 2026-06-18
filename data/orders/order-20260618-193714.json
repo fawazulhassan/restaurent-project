@@ -1,0 +1,26 @@
+{
+  "items": [
+    {
+      "id": "chicken-tikka-pizza",
+      "size": "large",
+      "qty": 1,
+      "name": "Chicken Tikka Pizza",
+      "name_urdu": "چکن ٹکہ پیزا",
+      "size_label": "Large",
+      "unit_price_pkr": 1400
+    },
+    {
+      "id": "coke-1-5l",
+      "size": null,
+      "qty": 2,
+      "name": "1.5L Coke",
+      "name_urdu": "1.5 لیٹر کوک",
+      "size_label": null,
+      "unit_price_pkr": 200
+    }
+  ],
+  "delivery_address": "khara road",
+  "special_instructions": null,
+  "customer_phone": null,
+  "status": "confirmed"
+}

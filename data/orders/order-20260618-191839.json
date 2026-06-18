@@ -1,0 +1,26 @@
+{
+  "items": [
+    {
+      "id": "chicken-biryani",
+      "size": "single",
+      "qty": 3,
+      "name": "Chicken Biryani",
+      "name_urdu": "چکن بریانی",
+      "size_label": "Single",
+      "unit_price_pkr": 350
+    },
+    {
+      "id": "mutton-karahi",
+      "size": "full",
+      "qty": 1,
+      "name": "Mutton Karahi",
+      "name_urdu": "مٹن کڑاہی",
+      "size_label": "Full",
+      "unit_price_pkr": 2200
+    }
+  ],
+  "delivery_address": "Harbanspura, Lahore",
+  "special_instructions": null,
+  "customer_phone": null,
+  "status": "confirmed"
+}

@@ -108,6 +108,7 @@ def calculate_total(order: Order) -> int:
 
 
 def build_confirmation_urdu(order: Order) -> str:
+    """Urdu-script confirmation (for TTS phase later)."""
     parts: list[str] = ["آپ کا آرڈر کنفرم ہو گیا ہے۔"]
 
     item_parts: list[str] = []
@@ -134,6 +135,59 @@ def build_confirmation_urdu(order: Order) -> str:
     return " ".join(parts)
 
 
+def build_confirmation_english(order: Order) -> str:
+    parts: list[str] = ["Your order is confirmed."]
+
+    item_parts: list[str] = []
+    for item in order.items:
+        if item.size_label:
+            item_parts.append(f"{item.qty}x {item.name} ({item.size_label})")
+        else:
+            item_parts.append(f"{item.qty}x {item.name}")
+
+    if item_parts:
+        parts.append(", ".join(item_parts) + ".")
+
+    total = calculate_total(order)
+    parts.append(f"Total Rs {total}.")
+
+    if order.delivery_address:
+        parts.append(f"Address: {order.delivery_address}.")
+    else:
+        parts.append("Please share your delivery address.")
+
+    if order.special_instructions:
+        parts.append(f"Notes: {order.special_instructions}.")
+
+    return " ".join(parts)
+
+
+def build_order_status_reply(order: Order) -> str:
+    """Factual in-progress order summary — qty and totals come from order state, not the LLM."""
+    lines: list[str] = []
+
+    if order.items:
+        lines.append("Your order:")
+        for item in order.items:
+            size = f" ({item.size_label})" if item.size_label else ""
+            lines.append(
+                f"- {item.qty}x {item.name}{size} — Rs {item.unit_price_pkr * item.qty}"
+            )
+        lines.append(f"Total: Rs {calculate_total(order)}")
+    else:
+        lines.append("No items in your order yet.")
+
+    if order.special_instructions:
+        lines.append(f"Notes: {order.special_instructions}")
+
+    if not order.delivery_address:
+        lines.append("Delivery address bata dein?")
+    elif order.status != OrderStatus.CONFIRMED:
+        lines.append("Bol dein 'confirm' jab order theek ho.")
+
+    return "\n".join(lines)
+
+
 def save_order(order: Order, orders_dir: Path | None = None) -> Path:
     out_dir = orders_dir or Path(__file__).parent.parent / "data" / "orders"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -152,11 +206,75 @@ def confirm_order(order: Order) -> Order:
     return order
 
 
+def _find_line_index(order: Order, item_id: str, size_id: str | None) -> int | None:
+    for i, line in enumerate(order.items):
+        if line.id == item_id and line.size == size_id:
+            return i
+    return None
+
+
+def update_item_qty(
+    order: Order, item_id: str, size_id: str | None, qty: int
+) -> Order:
+    idx = _find_line_index(order, item_id, size_id)
+    if idx is None:
+        raise OrderError("Item not in current order.")
+
+    if qty <= 0:
+        order.items.pop(idx)
+    else:
+        order.items[idx].qty = qty
+    return order
+
+
+def remove_item_from_order(
+    order: Order, item_id: str, size_id: str | None
+) -> Order:
+    idx = _find_line_index(order, item_id, size_id)
+    if idx is None:
+        raise OrderError("Item not in current order.")
+    order.items.pop(idx)
+    return order
+
+
+def apply_order_update(order: Order, update: dict) -> Order:
+    for entry in update.get("add_items") or []:
+        size_id = entry.get("size")
+        add_item_to_order(order, entry["id"], size_id, entry["qty"])
+
+    for entry in update.get("set_qty") or []:
+        size_id = entry.get("size")
+        update_item_qty(order, entry["id"], size_id, entry["qty"])
+
+    for entry in update.get("remove_items") or []:
+        size_id = entry.get("size")
+        remove_item_from_order(order, entry["id"], size_id)
+
+    if "delivery_address" in update and update["delivery_address"] is not None:
+        order.delivery_address = update["delivery_address"]
+
+    if "special_instructions" in update and update["special_instructions"] is not None:
+        order.special_instructions = update["special_instructions"]
+
+    if "customer_phone" in update and update["customer_phone"] is not None:
+        order.customer_phone = update["customer_phone"]
+
+    if update.get("confirm"):
+        if not order.items:
+            raise OrderError("Cannot confirm an empty order.")
+        if not order.delivery_address:
+            raise OrderError("Please provide a delivery address before confirming.")
+        confirm_order(order)
+
+    return order
+
+
 if __name__ == "__main__":
     import sys
 
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if reconfigure is not None:
+        reconfigure(encoding="utf-8")
 
     print(
         """Phase 1 — test yourself in Python REPL

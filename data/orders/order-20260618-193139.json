@@ -1,0 +1,35 @@
+{
+  "items": [
+    {
+      "id": "plain-naan",
+      "size": null,
+      "qty": 2,
+      "name": "Plain Naan",
+      "name_urdu": "سادہ نان",
+      "size_label": null,
+      "unit_price_pkr": 50
+    },
+    {
+      "id": "chicken-karahi",
+      "size": "half",
+      "qty": 1,
+      "name": "Chicken Karahi",
+      "name_urdu": "چکن کڑاہی",
+      "size_label": "Half",
+      "unit_price_pkr": 800
+    },
+    {
+      "id": "mint-margarita",
+      "size": "regular",
+      "qty": 1,
+      "name": "Mint Margarita",
+      "name_urdu": "پودینہ مارگیریٹا",
+      "size_label": "Regular",
+      "unit_price_pkr": 250
+    }
+  ],
+  "delivery_address": "Model Bazar Street Number 2",
+  "special_instructions": null,
+  "customer_phone": "0300000000",
+  "status": "confirmed"
+}
