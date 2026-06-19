@@ -127,6 +127,58 @@ def record_and_transcribe(
     )
 
 
+def record_push_to_talk(
+    *,
+    roman_bias: bool = True,  # reserved for Phase 7 — accepted, ignored in Phase 5
+    latinize: bool | None = None,  # reserved for Phase 7 — accepted, ignored in Phase 5
+    min_seconds: float | None = None,
+    max_seconds: float | None = None,
+) -> str:
+    """Press Enter to start (caller), Enter again to stop; transcribe captured audio."""
+    del roman_bias, latinize  # Phase 7
+
+    min_sec = config.PTT_MIN_SECONDS if min_seconds is None else min_seconds
+    max_sec = config.PTT_MAX_SECONDS if max_seconds is None else max_seconds
+    max_samples = int(max_sec * config.SAMPLE_RATE)
+
+    chunks: list[np.ndarray] = []
+    total_samples = 0
+
+    def callback(indata, frames, time_info, status):
+        nonlocal total_samples
+        if total_samples >= max_samples:
+            return
+        chunk = indata.copy()
+        remaining = max_samples - total_samples
+        if chunk.shape[0] > remaining:
+            chunk = chunk[:remaining]
+        chunks.append(chunk)
+        total_samples += chunk.shape[0]
+
+    try:
+        with sd.InputStream(
+            samplerate=config.SAMPLE_RATE,
+            channels=1,
+            dtype="float32",
+            callback=callback,
+        ):
+            input("Press Enter to stop...")
+    except sd.PortAudioError:
+        raise RuntimeError(
+            "Microphone not accessible — check Windows Privacy settings."
+        ) from None
+
+    if not chunks:
+        return ""
+
+    audio = np.concatenate(chunks, axis=0).flatten()
+    duration = audio.size / config.SAMPLE_RATE
+    if duration < min_sec:
+        return ""
+
+    return transcribe_audio(audio, config.SAMPLE_RATE)
+
+
 if __name__ == "__main__":
     print("Loading Whisper model...")
     text = record_and_transcribe(5)

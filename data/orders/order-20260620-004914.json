@@ -1,0 +1,26 @@
+{
+  "items": [
+    {
+      "id": "chicken-biryani",
+      "size": "single",
+      "qty": 1,
+      "name": "Chicken Biryani",
+      "name_urdu": "چکن بریانی",
+      "size_label": "Single",
+      "unit_price_pkr": 350
+    },
+    {
+      "id": "mint-margarita",
+      "size": "regular",
+      "qty": 1,
+      "name": "Mint Margarita",
+      "name_urdu": "پودینہ مارگیریٹا",
+      "size_label": "Regular",
+      "unit_price_pkr": 250
+    }
+  ],
+  "delivery_address": "purana laari adda",
+  "special_instructions": null,
+  "customer_phone": null,
+  "status": "confirmed"
+}

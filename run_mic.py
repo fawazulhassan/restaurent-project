@@ -1,4 +1,4 @@
-"""Voice ordering demo: fixed-duration recording + full agent (STT + dialog + TTS)."""
+"""Phase 5 full mic demo — speak, hear AI reply, save order."""
 
 import argparse
 
@@ -9,37 +9,22 @@ from app.agent import play_greeting, preload_models, process_text_turn
 from app.cli_utils import configure_stdout, print_order_summary
 from app.dialog import LLMRateLimitError, build_system_prompt
 from app.order import Order, build_confirmation_english, save_order
-from app.stt import record_and_transcribe
+from app.stt import record_push_to_talk
 from app.tts import play_audio
 
 QUIT_WORDS = frozenset({"quit", "exit", "band", "bye"})
-
-
-def listen(seconds: float) -> str:
-    print(f"Recording {seconds:.0f} seconds... speak now.")
-    try:
-        return record_and_transcribe(seconds, quiet=True, roman_bias=True)
-    except RuntimeError as e:
-        print(f"Mic error: {e}")
-        return ""
 
 
 def main() -> None:
     configure_stdout()
 
     parser = argparse.ArgumentParser(
-        description="Voice order chat — fixed-duration recording + TTS replies"
-    )
-    parser.add_argument(
-        "--seconds",
-        type=float,
-        default=config.DEFAULT_RECORD_SECONDS,
-        help="Seconds to record per turn (default: from config)",
+        description="Full voice order demo — STT + dialog + TTS"
     )
     parser.add_argument(
         "--latency",
         action="store_true",
-        help="Log per-turn LLM/TTS timings",
+        help="Log per-turn STT/LLM/TTS timings",
     )
     parser.add_argument(
         "--no-greeting",
@@ -49,8 +34,7 @@ def main() -> None:
     args = parser.parse_args()
 
     print("Assalam o alaikum! Welcome to Kasur Kitchen.")
-    print("Speak in Roman Urdu or English. Press Enter to record each turn.")
-    print("AI replies with voice. Ctrl+C to exit.\n")
+    print("Press Enter to speak, then Enter again to stop. Ctrl+C to exit.\n")
 
     preload_models()
 
@@ -68,20 +52,25 @@ def main() -> None:
             print("\nBye!")
             break
 
-        user_input = listen(args.seconds).strip()
-        if not user_input:
+        try:
+            user_text = record_push_to_talk().strip()
+        except RuntimeError as e:
+            print(f"Mic error: {e}")
+            continue
+
+        if not user_text:
             print("No speech detected. Try again.\n")
             continue
 
-        print(f"You: {user_input}")
+        print(f"You: {user_text}")
 
-        if user_input.lower() in QUIT_WORDS:
+        if user_text.lower() in QUIT_WORDS:
             print("Bye!")
             break
 
         try:
-            reply, reply_audio, order, messages, is_complete = process_text_turn(
-                user_input, order, messages, log_latency=log_latency
+            reply_text, reply_audio, order, messages, is_complete = process_text_turn(
+                user_text, order, messages, log_latency=log_latency
             )
         except (LLMRateLimitError, RateLimitError) as e:
             print(f"\nRate limit: {e}\n")
@@ -90,7 +79,7 @@ def main() -> None:
             print(f"\nError: {e}\n")
             continue
 
-        print(f"\nAI: {reply}\n")
+        print(f"\nAI: {reply_text}\n")
         print_order_summary(order)
 
         if reply_audio:

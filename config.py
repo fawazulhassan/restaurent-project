@@ -43,3 +43,15 @@ DEFAULT_RECORD_SECONDS = float(os.getenv("STT_RECORD_SECONDS", "5"))
 TTS_MODEL = os.getenv("TTS_MODEL", "facebook/mms-tts-urd-script_latin").strip()
 TTS_DEVICE = os.getenv("TTS_DEVICE", "cpu").strip()
 TTS_SAMPLE_RATE = int(os.getenv("TTS_SAMPLE_RATE", "16000"))
+
+# Agent / push-to-talk — Phase 5
+PTT_MAX_SECONDS = float(os.getenv("PTT_MAX_SECONDS", "30"))
+PTT_MIN_SECONDS = float(os.getenv("PTT_MIN_SECONDS", "0.5"))
+AGENT_GREETING = os.getenv(
+    "AGENT_GREETING", "Assalam o alaikum, aap ka kya order hai?"
+).strip()
+AGENT_LOG_LATENCY = os.getenv("AGENT_LOG_LATENCY", "false").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
