@@ -1,0 +1,26 @@
+{
+  "items": [
+    {
+      "id": "chicken-tikka-pizza",
+      "size": "small",
+      "qty": 1,
+      "name": "Chicken Tikka Pizza",
+      "name_urdu": "چکن ٹکہ پیزا",
+      "size_label": "Small",
+      "unit_price_pkr": 800
+    },
+    {
+      "id": "mint-margarita",
+      "size": "regular",
+      "qty": 1,
+      "name": "Mint Margarita",
+      "name_urdu": "پودینہ مارگیریٹا",
+      "size_label": "Regular",
+      "unit_price_pkr": 250
+    }
+  ],
+  "delivery_address": "Kot Azam Khan, Kasur",
+  "special_instructions": null,
+  "customer_phone": null,
+  "status": "confirmed"
+}

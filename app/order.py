@@ -162,6 +162,34 @@ def build_confirmation_english(order: Order) -> str:
     return " ".join(parts)
 
 
+def build_confirmation_roman(order: Order) -> str:
+    """Roman Urdu confirmation (Latin script, for TTS)."""
+    parts: list[str] = ["Aap ka order confirm ho gaya hai."]
+
+    item_parts: list[str] = []
+    for item in order.items:
+        if item.size_label:
+            item_parts.append(f"{item.qty} {item.name} ({item.size_label})")
+        else:
+            item_parts.append(f"{item.qty} {item.name}")
+
+    if item_parts:
+        parts.append(", ".join(item_parts) + ",")
+
+    total = calculate_total(order)
+    parts.append(f"kul Rs {total}.")
+
+    if order.delivery_address:
+        parts.append(f"Pata: {order.delivery_address}.")
+    else:
+        parts.append("Barah e karam delivery ka pata batain.")
+
+    if order.special_instructions:
+        parts.append(f"Hidayat: {order.special_instructions}.")
+
+    return " ".join(parts)
+
+
 def build_order_status_reply(order: Order) -> str:
     """Factual in-progress order summary — qty and totals come from order state, not the LLM."""
     lines: list[str] = []
@@ -183,7 +211,7 @@ def build_order_status_reply(order: Order) -> str:
     if not order.delivery_address:
         lines.append("Delivery address bata dein?")
     elif order.status != OrderStatus.CONFIRMED:
-        lines.append("Bol dein 'confirm' jab order theek ho.")
+        lines.append("Bol dein 'confirm' jab order thek ho.")
 
     return "\n".join(lines)
 

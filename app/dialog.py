@@ -1,4 +1,5 @@
 import json
+import re
 import time
 from pathlib import Path
 
@@ -154,8 +155,9 @@ def build_system_prompt() -> str:
 
     return f"""You are a friendly order-taker for {restaurant_name} in Kasur, Pakistan.
 
-Customers speak Roman Urdu mixed with English.
-Always reply in Roman English only (Latin script). Example: "2 chicken karahi add ho gaye. Delivery address bata dein."
+Customers speak Roman Urdu mixed with English (sometimes Urdu script from voice).
+Always reply in Roman Urdu using ONLY the Latin alphabet (a-z). Never use Arabic/Urdu script.
+Examples: "Aapka shukriya! Kabhi bhi order dena ho to bata dein." / "2 chicken karahi add ho gaye. Delivery address bata dein?"
 
 MENU (use exact id and size values):
 {menu_text}
@@ -167,7 +169,7 @@ RULES:
 - Summarize the order and PKR total before asking for final confirmation.
 - If an item is not on the menu or unavailable, say so and suggest real alternatives.
 - Use the update_order tool to change the order. Set confirm=true only when the customer explicitly confirms.
-- Keep replies short and natural in Roman English. Do not use Urdu or Arabic script.
+- Keep replies short and natural in Roman Urdu (Latin script only). Never use Urdu/Arabic script characters.
 - Do not state item quantities or Rs totals in your message; the system shows the verified order summary."""
 
 
@@ -335,6 +337,46 @@ def _order_fingerprint(order: Order) -> str:
     return json.dumps(order.model_dump(mode="json"), sort_keys=True)
 
 
+_ARABIC_SCRIPT_RE = re.compile(r"[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]")
+
+
+def _contains_arabic_script(text: str) -> bool:
+    return bool(_ARABIC_SCRIPT_RE.search(text))
+
+
+def _ensure_roman_reply(
+    reply_text: str, messages: list[dict], order: Order
+) -> str:
+    """Re-ask LLM once if it replied in Urdu/Arabic script instead of Roman Latin."""
+    if not reply_text or not _contains_arabic_script(reply_text):
+        return reply_text
+
+    repair_messages = _api_messages_with_context(messages, order)
+    repair_messages.append(
+        {
+            "role": "user",
+            "content": (
+                "Rewrite your last reply in Roman Urdu using ONLY Latin letters (a-z). "
+                "No Arabic or Urdu script. Keep the same meaning. Example style: "
+                "Aapka shukriya! Kabhi bhi order dena ho to bata dein."
+            ),
+        }
+    )
+    try:
+        response = _call_llm(repair_messages, tool_choice="none")
+        assistant_message = _extract_assistant_message(response)
+        fixed = (assistant_message.content or "").strip()
+        if fixed and not _contains_arabic_script(fixed):
+            messages.append({"role": "user", "content": repair_messages[-1]["content"]})
+            messages.append(
+                {"role": "assistant", "content": fixed},
+            )
+            return fixed
+    except (LLMRateLimitError, BadRequestError):
+        pass
+    return reply_text
+
+
 def chat_turn(
     user_message: str,
     order: Order,
@@ -371,5 +413,7 @@ def chat_turn(
         reply_text = build_confirmation_english(order)
     elif order_changed:
         reply_text = build_order_status_reply(order)
+    else:
+        reply_text = _ensure_roman_reply(reply_text, messages, order)
 
     return reply_text, order, messages, is_complete

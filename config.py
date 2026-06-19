@@ -18,3 +18,28 @@ if not OPENROUTER_API_KEY or OPENROUTER_API_KEY == "your_openrouter_api_key_here
     raise ValueError(
         "OPENROUTER_API_KEY is missing. Copy .env.example to .env and set your key."
     )
+
+# Speech-to-text (faster-whisper) — Phase 3
+WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
+WHISPER_DEVICE = os.getenv("WHISPER_DEVICE", "cpu")
+WHISPER_COMPUTE_TYPE = os.getenv("WHISPER_COMPUTE_TYPE", "int8")
+# Default "ur" avoids Hindi (Devanagari) mis-detection for Pakistani Roman Urdu speech
+_lang = os.getenv("WHISPER_LANGUAGE", "ur").strip().lower()
+WHISPER_LANGUAGE = None if _lang in ("", "none", "auto") else _lang
+WHISPER_BEAM_SIZE = int(os.getenv("WHISPER_BEAM_SIZE", "5"))
+WHISPER_INITIAL_PROMPT = os.getenv(
+    "WHISPER_INITIAL_PROMPT",
+    "mujhe pizza chahiye, chicken karahi, biryani, naan, Kasur, delivery address bata dein.",
+).strip()
+WHISPER_ROMAN_PROMPT = os.getenv(
+    "WHISPER_ROMAN_PROMPT",
+    "Assalam o alaikum. mujhe ek chicken tikka pizza chahiye small size. "
+    "mint margarita regular. delivery address bata dein. confirm. Kot Kasur.",
+).strip()
+SAMPLE_RATE = 16000
+DEFAULT_RECORD_SECONDS = float(os.getenv("STT_RECORD_SECONDS", "5"))
+
+# Text-to-speech (MMS-TTS) — Phase 4
+TTS_MODEL = os.getenv("TTS_MODEL", "facebook/mms-tts-urd-script_latin").strip()
+TTS_DEVICE = os.getenv("TTS_DEVICE", "cpu").strip()
+TTS_SAMPLE_RATE = int(os.getenv("TTS_SAMPLE_RATE", "16000"))
