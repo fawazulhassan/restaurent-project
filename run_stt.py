@@ -10,15 +10,19 @@
 import argparse
 import sys
 import time
+from typing import Any
 
-from app.stt import get_model, record_and_transcribe, transcribe_file
+from app.stt import preload_stt, record_and_transcribe, transcribe_file
 
 import config
 
 
 def configure_stdout() -> None:
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
+    stdout = sys.stdout
+    if hasattr(stdout, "reconfigure"):
+        casted = stdout  # keep runtime check; cast for static type checker
+        casted_any: Any = casted
+        casted_any.reconfigure(encoding="utf-8")
 
 
 def print_result(text: str) -> None:
@@ -39,8 +43,7 @@ def run_once(seconds: float) -> None:
 
 def run_file(path: str) -> None:
     print(f"Transcribing file: {path}")
-    print("Loading Whisper model...")
-    get_model()
+    preload_stt()
     start = time.perf_counter()
     text = transcribe_file(path, roman_bias=True, latinize=True)
     elapsed = time.perf_counter() - start
@@ -49,8 +52,7 @@ def run_file(path: str) -> None:
 
 
 def run_loop(seconds: float) -> None:
-    print("Loading Whisper model...")
-    get_model()
+    preload_stt()
     print("STT loop — Ctrl+C to exit.\n")
     while True:
         try:
@@ -73,7 +75,9 @@ def run_loop(seconds: float) -> None:
 def main() -> None:
     configure_stdout()
 
-    parser = argparse.ArgumentParser(description="Phase 3 STT test CLI (no AI replies)")
+    parser = argparse.ArgumentParser(
+        description=f"STT test CLI ({config.STT_PROVIDER}, no AI replies)"
+    )
     parser.add_argument(
         "--seconds",
         type=float,
@@ -101,8 +105,7 @@ def main() -> None:
         run_loop(args.seconds)
         return
 
-    print("Loading Whisper model...")
-    get_model()
+    preload_stt()
     print("STT only — no AI reply. Heard text is Roman Urdu (Latin letters).")
     print("For full voice chat use: python run_voice.py\n")
     run_once(args.seconds)

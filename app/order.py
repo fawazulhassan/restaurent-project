@@ -5,6 +5,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from app.numbers_urdu import number_to_urdu_words
+
 _MENU_CACHE: dict | None = None
 
 
@@ -82,7 +84,9 @@ def add_item_to_order(
 ) -> Order:
     result = validate_item(item_id, size_id)
     size = result["size"]
-    size_label = size["label"] if size is not None else None
+    size_label = (
+        size.get("label_urdu", size["label"]) if size is not None else None
+    )
 
     for line in order.items:
         if line.id == item_id and line.size == size_id:
@@ -95,7 +99,9 @@ def add_item_to_order(
             size=size_id,
             qty=qty,
             name=result["item"]["name"],
-            name_urdu=result["item"]["name_urdu"],
+            name_urdu=result["item"].get(
+                "spoken_name_urdu", result["item"]["name_urdu"]
+            ),
             size_label=size_label,
             unit_price_pkr=result["unit_price_pkr"],
         )
@@ -113,16 +119,19 @@ def build_confirmation_urdu(order: Order) -> str:
 
     item_parts: list[str] = []
     for item in order.items:
+        quantity_words = number_to_urdu_words(item.qty)
         if item.size_label:
-            item_parts.append(f"{item.qty} {item.name_urdu} ({item.size_label})")
+            item_parts.append(
+                f"{quantity_words} {item.name_urdu} ({item.size_label})"
+            )
         else:
-            item_parts.append(f"{item.qty} {item.name_urdu}")
+            item_parts.append(f"{quantity_words} {item.name_urdu}")
 
     if item_parts:
         parts.append("، ".join(item_parts) + "،")
 
     total = calculate_total(order)
-    parts.append(f"کل Rs {total}۔")
+    parts.append(f"کل {number_to_urdu_words(total)} روپے۔")
 
     if order.delivery_address:
         parts.append(f"پتہ: {order.delivery_address}۔")
@@ -262,6 +271,29 @@ def remove_item_from_order(
     if idx is None:
         raise OrderError("Item not in current order.")
     order.items.pop(idx)
+    return order
+
+
+def change_item_size(
+    order: Order,
+    item_id: str,
+    old_size_id: str | None,
+    new_size_id: str,
+) -> Order:
+    """Atomically replace an existing sized line with another valid size."""
+    idx = _find_line_index(order, item_id, old_size_id)
+    if idx is None:
+        raise OrderError("Item/size is not in the current order.")
+
+    original_line = order.items[idx]
+    validate_item(item_id, new_size_id)
+    if old_size_id == new_size_id:
+        return order
+
+    candidate = order.model_copy(deep=True)
+    remove_item_from_order(candidate, item_id, old_size_id)
+    add_item_to_order(candidate, item_id, new_size_id, original_line.qty)
+    order.items = candidate.items
     return order
 
 

@@ -1,14 +1,14 @@
-"""Phase 4 TTS test CLI — synthesize Roman Urdu text to speech."""
+"""Phase 4 Piper TTS test CLI — synthesize Urdu-script text to speech."""
 
 import argparse
 import sys
 import time
 
 import config
-from app.order import Order, add_item_to_order, build_confirmation_roman, confirm_order
-from app.tts import get_tts_model, play_audio, synthesize, synthesize_to_file
+from app.order import Order, add_item_to_order, build_confirmation_urdu, confirm_order
+from app.tts import check_tts_service, play_audio, synthesize_to_file
 
-DEFAULT_GREETING = "Assalam o alaikum, aap ka kya order hai?"
+DEFAULT_GREETING = "السلام علیکم، آپ کیا آرڈر کرنا چاہیں گے؟"
 
 
 def configure_stdout() -> None:
@@ -33,7 +33,7 @@ def main() -> None:
         "--text",
         type=str,
         default=None,
-        help="Roman Urdu text to synthesize",
+        help="Urdu-script text to synthesize",
     )
     parser.add_argument(
         "--file",
@@ -54,14 +54,14 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.confirm:
-        text = build_confirmation_roman(sample_confirmation_order())
+        text = build_confirmation_urdu(sample_confirmation_order())
     elif args.text:
         text = args.text
     else:
         text = DEFAULT_GREETING
 
-    print("Loading TTS model...")
-    get_tts_model()
+    print("Checking Piper TTS service...")
+    check_tts_service()
 
     print(f"Synthesizing: {text}")
     start = time.perf_counter()

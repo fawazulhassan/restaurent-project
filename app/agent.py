@@ -7,28 +7,27 @@ from collections.abc import Callable
 from typing import Any
 
 import numpy as np
-from openai import RateLimitError
 
 import config
-from app.dialog import LLMRateLimitError, build_system_prompt, chat_turn
-from app.order import Order, build_confirmation_roman, save_order
-from app.stt import transcribe_audio
-from app.tts import play_audio, synthesize
+from app.dialog import build_system_prompt, chat_turn
+from app.dialog_state import DialogState
+from app.llm import LLMRateLimitError, LLMServiceError, preload_llm
+from app.order import Order, build_confirmation_urdu, save_order
+from app.stt import preload_stt, transcribe_audio
+from app.tts import TTSServiceError, check_tts_service, play_audio, synthesize
 
 
 def preload_models() -> None:
-    print("Loading models...")
-    from app.stt import get_model
-    from app.tts import get_tts_model
-
-    get_model()
-    get_tts_model()
+    print("Checking services...")
+    preload_stt()
+    preload_llm()
+    check_tts_service()
     print("Ready.")
 
 
 def reply_text_for_tts(reply: str, order: Order, is_complete: bool) -> str:
     if is_complete:
-        return build_confirmation_roman(order)
+        return build_confirmation_urdu(order)
     return reply.strip()
 
 
@@ -37,15 +36,21 @@ def process_text_turn(
     order: Order,
     messages: list[dict],
     *,
+    dialog_state: DialogState | None = None,
     log_latency: bool | None = None,
 ) -> tuple[str, bytes, Order, list[dict], bool]:
     """Returns (reply_text, reply_audio_wav, order, messages, is_complete)."""
     should_log = config.AGENT_LOG_LATENCY if log_latency is None else log_latency
     t0 = time.perf_counter()
 
-    reply_text, order, messages, is_complete = chat_turn(
-        user_message, order, messages
-    )
+    if dialog_state is None:
+        reply_text, order, messages, is_complete = chat_turn(
+            user_message, order, messages
+        )
+    else:
+        reply_text, order, messages, is_complete = chat_turn(
+            user_message, order, messages, dialog_state=dialog_state
+        )
     t_llm = time.perf_counter()
 
     tts_text = reply_text_for_tts(reply_text, order, is_complete)
@@ -55,13 +60,23 @@ def process_text_turn(
             reply_audio = synthesize(tts_text)
         except ValueError:
             pass
+        except TTSServiceError as exc:
+            print(f"TTS warning: {exc}")
     t_tts = time.perf_counter()
 
     if should_log:
-        print(
-            f"  [latency] llm={t_llm - t0:.1f}s tts={t_tts - t_llm:.1f}s "
-            f"total={t_tts - t0:.1f}s"
-        )
+        if dialog_state is not None and config.HYBRID_INTENT_ENABLED:
+            print(
+                f"  [latency] parser={dialog_state.last_parser_seconds:.3f}s "
+                f"llm={dialog_state.last_llm_seconds:.1f}s "
+                f"tts={t_tts - t_llm:.1f}s total={t_tts - t0:.1f}s "
+                f"path={dialog_state.last_path}"
+            )
+        else:
+            print(
+                f"  [latency] llm={t_llm - t0:.1f}s "
+                f"tts={t_tts - t_llm:.1f}s total={t_tts - t0:.1f}s"
+            )
 
     return reply_text, reply_audio, order, messages, is_complete
 
@@ -72,6 +87,7 @@ def process_audio_turn(
     order: Order,
     messages: list[dict],
     *,
+    dialog_state: DialogState | None = None,
     log_latency: bool | None = None,
 ) -> tuple[str, str, bytes, Order, list[dict], bool]:
     """Returns (user_text, reply_text, reply_audio, order, messages, is_complete)."""
@@ -82,7 +98,11 @@ def process_audio_turn(
     t_stt = time.perf_counter()
 
     reply_text, reply_audio, order, messages, is_complete = process_text_turn(
-        user_text, order, messages, log_latency=False
+        user_text,
+        order,
+        messages,
+        dialog_state=dialog_state,
+        log_latency=False,
     )
     t_end = time.perf_counter()
 
@@ -103,6 +123,8 @@ def play_greeting(greeting: str | None = None) -> None:
         play_audio(synthesize(text))
     except ValueError:
         pass
+    except TTSServiceError as exc:
+        print(f"TTS warning: {exc}")
 
 
 def run_conversation(
@@ -118,6 +140,7 @@ def run_conversation(
 
     order = Order()
     messages = [{"role": "system", "content": build_system_prompt()}]
+    dialog_state = DialogState()
 
     if play_greeting_audio:
         play_greeting(greeting)
@@ -138,10 +161,17 @@ def run_conversation(
 
         try:
             reply_text, reply_audio, order, messages, is_complete = process_text_turn(
-                user_text, order, messages, log_latency=log_latency
+                user_text,
+                order,
+                messages,
+                dialog_state=dialog_state,
+                log_latency=log_latency,
             )
-        except (LLMRateLimitError, RateLimitError) as e:
+        except LLMRateLimitError as e:
             print(f"\nRate limit: {e}\n")
+            continue
+        except LLMServiceError as e:
+            print(f"\nLLM error: {e}\n")
             continue
         except Exception as e:
             print(f"\nError: {e}\n")

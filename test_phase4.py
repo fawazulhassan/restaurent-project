@@ -1,112 +1,238 @@
-"""Phase 4 TTS smoke tests."""
+"""Phase 4 Piper HTTP TTS unit tests (no live server required)."""
 
+from __future__ import annotations
+
+import contextlib
 import io
-import time
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
 
+import httpx
+import numpy as np
 import scipy.io.wavfile
 
-from app.order import Order, add_item_to_order, build_confirmation_roman, confirm_order
-from app.tts import DEFAULT_TTS_OUTPUT, get_tts_model, synthesize, synthesize_to_file
+import config
+from app import tts
 
-GREETING = "Assalam o alaikum, aap ka kya order hai?"
-LONG_TEXT = (
-    "Assalam o alaikum, Kasur Kitchen mein khush amdeed. "
-    "Aaj aap kya order karna chahte hain? "
-    "Humare paas chicken karahi, biryani aur pizza available hain. "
-    "Delivery address bata dein taake order confirm ho sake."
-)
+URDU_GREETING = "السلام علیکم، آپ کیا آرڈر کرنا چاہیں گے؟"
 
 
-def _sample_order() -> Order:
-    order = Order()
-    add_item_to_order(order, "chicken-karahi", "full", 2)
-    order.delivery_address = "Model Town, Kasur"
-    confirm_order(order)
-    return order
-
-
-def _is_riff_wav(wav_bytes: bytes) -> bool:
-    return len(wav_bytes) >= 4 and wav_bytes[:4] == b"RIFF"
-
-
-def test_greeting() -> None:
-    print("Test 4.1: greeting...")
-    wav = synthesize(GREETING)
-    if not wav:
-        raise SystemExit("FAIL 4.1: empty WAV bytes")
-    if not _is_riff_wav(wav):
-        raise SystemExit("FAIL 4.1: missing RIFF header")
-    print("PASS 4.1")
-
-
-def test_confirmation() -> None:
-    print("Test 4.2: order confirmation...")
-    text = build_confirmation_roman(_sample_order())
-    wav = synthesize(text)
-    if not wav or not _is_riff_wav(wav):
-        raise SystemExit("FAIL 4.2: invalid confirmation WAV")
-    print("PASS 4.2")
-
-
-def test_empty_text() -> None:
-    print("Test 4.3: empty text...")
-    try:
-        synthesize("")
-    except ValueError as exc:
-        if "empty" not in str(exc).lower():
-            raise SystemExit(f"FAIL 4.3: unexpected error: {exc}") from exc
+def _wav_bytes(
+    *,
+    sample_rate: int = 22050,
+    stereo: bool = False,
+    dtype=np.int16,
+) -> bytes:
+    frames = max(100, sample_rate // 20)
+    tone = np.linspace(-12000, 12000, frames, dtype=np.float32)
+    if stereo:
+        samples = np.column_stack((tone, tone / 2))
     else:
-        raise SystemExit("FAIL 4.3: expected ValueError for empty text")
-    print("PASS 4.3")
+        samples = tone
+    samples = samples.astype(dtype)
+    buffer = io.BytesIO()
+    scipy.io.wavfile.write(buffer, sample_rate, samples)
+    return buffer.getvalue()
 
 
-def test_long_text() -> None:
-    print("Test 4.4: long text...")
-    short = synthesize(GREETING)
-    long_wav = synthesize(LONG_TEXT)
-    if len(long_wav) <= len(short):
-        raise SystemExit("FAIL 4.4: long text WAV not longer than greeting")
-    print("PASS 4.4")
+def _response(
+    *,
+    method: str,
+    url: str,
+    status_code: int = 200,
+    content: bytes = b"",
+    json_data: dict | None = None,
+) -> httpx.Response:
+    request = httpx.Request(method, url)
+    if json_data is not None:
+        return httpx.Response(
+            status_code,
+            json=json_data,
+            request=request,
+        )
+    return httpx.Response(
+        status_code,
+        content=content,
+        request=request,
+    )
 
 
-def test_file_output() -> None:
-    print("Test 4.5: file output...")
-    out_path = synthesize_to_file(GREETING)
-    if not out_path.is_file():
-        raise SystemExit(f"FAIL 4.5: file missing at {out_path}")
-    sr, data = scipy.io.wavfile.read(out_path)
-    if data.size == 0:
-        raise SystemExit("FAIL 4.5: empty audio data")
-    if sr <= 0:
-        raise SystemExit("FAIL 4.5: invalid sample rate")
-    if out_path != DEFAULT_TTS_OUTPUT:
-        raise SystemExit("FAIL 4.5: default path mismatch")
-    print("PASS 4.5")
+class PiperTtsTests(unittest.TestCase):
+    def test_empty_text_raises_value_error(self) -> None:
+        with self.assertRaisesRegex(ValueError, "empty"):
+            tts.synthesize("   ")
 
+    def test_health_check_logs_version_and_returns_none(self) -> None:
+        response = _response(
+            method="GET",
+            url=f"{config.PIPER_TTS_URL}/info",
+            json_data={
+                "version": "1.6.0",
+                "voice": {"name": config.PIPER_TTS_VOICE},
+            },
+        )
+        output = io.StringIO()
+        with patch("app.tts.httpx.get", return_value=response), contextlib.redirect_stdout(
+            output
+        ):
+            result = tts.check_tts_service()
 
-def test_latency() -> None:
-    print("Test 4.6: latency...")
-    start = time.perf_counter()
-    synthesize(GREETING)
-    elapsed = time.perf_counter() - start
-    print(f"Latency: {elapsed:.1f}s")
-    if elapsed > 8:
-        print("WARN 4.6: synthesis took longer than 8s on CPU")
-    print("PASS 4.6")
+        self.assertIsNone(result)
+        self.assertIn("version 1.6.0", output.getvalue())
+        self.assertIn(config.PIPER_TTS_VOICE, output.getvalue())
 
+    def test_health_check_invalid_json_raises_service_error(self) -> None:
+        response = _response(
+            method="GET",
+            url=f"{config.PIPER_TTS_URL}/info",
+            content=b"not-json",
+        )
+        with patch("app.tts.httpx.get", return_value=response):
+            with self.assertRaisesRegex(tts.TTSServiceError, "invalid JSON"):
+                tts.check_tts_service()
 
-def main() -> None:
-    print("Loading TTS model (first run may download ~1-2 min)...")
-    get_tts_model()
+    def test_health_check_timeout_raises_service_error(self) -> None:
+        request = httpx.Request("GET", f"{config.PIPER_TTS_URL}/info")
+        error = httpx.ReadTimeout("timeout", request=request)
+        with patch("app.tts.httpx.get", side_effect=error):
+            with self.assertRaisesRegex(tts.TTSServiceError, "timed out"):
+                tts.check_tts_service()
 
-    test_greeting()
-    test_confirmation()
-    test_empty_text()
-    test_long_text()
-    test_file_output()
-    test_latency()
-    print("\nAll Phase 4 tests passed.")
+    def test_synthesize_sends_urdu_and_voice_and_returns_16khz_mono(self) -> None:
+        response = _response(
+            method="POST",
+            url=f"{config.PIPER_TTS_URL}/synthesize",
+            content=_wav_bytes(),
+        )
+        with patch("app.tts.httpx.post", return_value=response) as post:
+            wav = tts.synthesize(URDU_GREETING)
+
+        kwargs = post.call_args.kwargs
+        self.assertEqual(kwargs["json"]["text"], URDU_GREETING)
+        self.assertEqual(kwargs["json"]["voice"], config.PIPER_TTS_VOICE)
+        self.assertTrue(wav.startswith(b"RIFF"))
+        sample_rate, samples = scipy.io.wavfile.read(io.BytesIO(wav))
+        self.assertEqual(sample_rate, 16000)
+        self.assertEqual(samples.ndim, 1)
+        self.assertEqual(samples.dtype, np.int16)
+
+    def test_resampling_preserves_duration(self) -> None:
+        source_wav = _wav_bytes()
+        source_rate, source_samples = scipy.io.wavfile.read(io.BytesIO(source_wav))
+
+        converted_wav = tts._convert_piper_wav(source_wav)
+        target_rate, target_samples = scipy.io.wavfile.read(
+            io.BytesIO(converted_wav)
+        )
+
+        source_duration = len(source_samples) / source_rate
+        target_duration = len(target_samples) / target_rate
+        self.assertAlmostEqual(source_duration, target_duration, places=3)
+
+    def test_native_22050_mode_preserves_rate_and_duration(self) -> None:
+        source_wav = _wav_bytes()
+        source_rate, source_samples = scipy.io.wavfile.read(io.BytesIO(source_wav))
+
+        with patch("app.tts.config.TTS_SAMPLE_RATE", 22050):
+            converted_wav = tts._convert_piper_wav(source_wav)
+
+        target_rate, target_samples = scipy.io.wavfile.read(
+            io.BytesIO(converted_wav)
+        )
+        self.assertEqual(target_rate, 22050)
+        self.assertEqual(len(target_samples), len(source_samples))
+        self.assertEqual(source_rate, target_rate)
+
+    def test_stereo_is_converted_to_mono(self) -> None:
+        response = _response(
+            method="POST",
+            url=f"{config.PIPER_TTS_URL}/synthesize",
+            content=_wav_bytes(stereo=True),
+        )
+        with patch("app.tts.httpx.post", return_value=response):
+            wav = tts.synthesize(URDU_GREETING)
+
+        sample_rate, samples = scipy.io.wavfile.read(io.BytesIO(wav))
+        self.assertEqual(sample_rate, 16000)
+        self.assertEqual(samples.ndim, 1)
+
+    def test_values_are_clipped_and_converted_to_pcm16(self) -> None:
+        samples = np.array([-50000, -32768, 0, 32767, 50000], dtype=np.int32)
+        buffer = io.BytesIO()
+        scipy.io.wavfile.write(buffer, 16000, samples)
+
+        wav = tts._convert_piper_wav(buffer.getvalue())
+        _, converted = scipy.io.wavfile.read(io.BytesIO(wav))
+        self.assertEqual(converted.dtype, np.int16)
+        self.assertEqual(int(converted.min()), -32768)
+        self.assertEqual(int(converted.max()), 32767)
+
+    def test_non_mono_after_conversion_raises_service_error(self) -> None:
+        samples = np.zeros((10, 2, 2), dtype=np.int16)
+        with patch("app.tts._decode_wav", return_value=(16000, samples)):
+            with self.assertRaisesRegex(tts.TTSServiceError, "not mono"):
+                tts._convert_piper_wav(b"unused")
+
+    def test_invalid_non_riff_response_raises_service_error(self) -> None:
+        response = _response(
+            method="POST",
+            url=f"{config.PIPER_TTS_URL}/synthesize",
+            content=b"<html>rate limited</html>",
+        )
+        with patch("app.tts.httpx.post", return_value=response):
+            with self.assertRaisesRegex(tts.TTSServiceError, "RIFF"):
+                tts.synthesize(URDU_GREETING)
+
+    def test_invalid_riff_wav_raises_service_error(self) -> None:
+        response = _response(
+            method="POST",
+            url=f"{config.PIPER_TTS_URL}/synthesize",
+            content=b"RIFF\x00\x00\x00\x00WAVE",
+        )
+        with patch("app.tts.httpx.post", return_value=response):
+            with self.assertRaisesRegex(tts.TTSServiceError, "could not be decoded"):
+                tts.synthesize(URDU_GREETING)
+
+    def test_synthesis_http_error_raises_service_error(self) -> None:
+        response = _response(
+            method="POST",
+            url=f"{config.PIPER_TTS_URL}/synthesize",
+            status_code=503,
+            content=b"unavailable",
+        )
+        with patch("app.tts.httpx.post", return_value=response):
+            with self.assertRaisesRegex(tts.TTSServiceError, "HTTP 503"):
+                tts.synthesize(URDU_GREETING)
+
+    def test_unexpected_sample_rate_raises_service_error(self) -> None:
+        response = _response(
+            method="POST",
+            url=f"{config.PIPER_TTS_URL}/synthesize",
+            content=_wav_bytes(sample_rate=44100),
+        )
+        with patch("app.tts.httpx.post", return_value=response):
+            with self.assertRaisesRegex(tts.TTSServiceError, "sample rate 44100"):
+                tts.synthesize(URDU_GREETING)
+
+    def test_synthesize_to_file_writes_resampled_output(self) -> None:
+        response = _response(
+            method="POST",
+            url=f"{config.PIPER_TTS_URL}/synthesize",
+            content=_wav_bytes(),
+        )
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_path = Path(tmp_dir) / "urdu.wav"
+            with patch("app.tts.httpx.post", return_value=response):
+                saved_path = tts.synthesize_to_file(URDU_GREETING, output_path)
+
+            sample_rate, samples = scipy.io.wavfile.read(saved_path)
+            self.assertEqual(saved_path, output_path)
+            self.assertEqual(sample_rate, 16000)
+            self.assertEqual(samples.ndim, 1)
+            self.assertEqual(samples.dtype, np.int16)
 
 
 if __name__ == "__main__":
-    main()
+    unittest.main(verbosity=2)

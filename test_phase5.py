@@ -6,13 +6,14 @@ Manual mic checklist (run: python run_mic.py):
   5.3 Invalid menu item -> AI explains and suggests alternatives
   5.4 Multi-turn (4-6 turns) -> coherent conversation, correct order state
   5.5 Roman Urdu + English speech -> STT + dialog understand
-  5.6 AI reply quality -> TTS speaks understandable Roman Urdu
+  5.6 AI reply quality -> Piper speaks understandable Urdu script
   5.7 One turn latency -> STT + LLM + TTS under ~15s on CPU (use --latency)
   5.8 After confirm -> valid JSON in data/orders/
 """
 
 import sys
 import time
+from unittest.mock import patch
 
 reconfigure = getattr(sys.stdout, "reconfigure", None)
 if reconfigure is not None:
@@ -21,7 +22,9 @@ if reconfigure is not None:
 import config
 from app.agent import preload_models, process_text_turn, reply_text_for_tts
 from app.dialog import build_system_prompt
+from app.llm import LLMServiceError, check_llm_service
 from app.order import Order, OrderStatus, add_item_to_order, confirm_order
+from app.tts import TTSServiceError, check_tts_service
 
 PASS = 0
 FAIL = 0
@@ -44,13 +47,24 @@ def skip(name: str, reason: str) -> None:
     print(f"  SKIP  {name} — {reason}")
 
 
-def _api_key_ready() -> bool:
-    key = config.OPENROUTER_API_KEY
-    return bool(key) and key != "your_openrouter_api_key_here"
+def _llm_ready() -> bool:
+    try:
+        check_llm_service()
+        return True
+    except LLMServiceError:
+        return False
 
 
 def _is_riff_wav(wav_bytes: bytes) -> bool:
     return len(wav_bytes) >= 4 and wav_bytes[:4] == b"RIFF"
+
+
+def _piper_ready() -> bool:
+    try:
+        check_tts_service()
+        return True
+    except TTSServiceError:
+        return False
 
 
 def test_5xa_reply_text_for_tts() -> None:
@@ -61,17 +75,58 @@ def test_5xa_reply_text_for_tts() -> None:
     confirm_order(order)
 
     tts_text = reply_text_for_tts("Your order is confirmed.", order, is_complete=True)
-    check("5.x-a roman confirmation", tts_text.startswith("Aap ka order confirm"))
-    check("5.x-a mentions total", "Rs" in tts_text)
+    check("5.x-a Urdu confirmation", tts_text.startswith("آپ کا آرڈر کنفرم"))
+    check("5.x-a mentions total", "کل" in tts_text)
 
-    passthrough = reply_text_for_tts("Delivery address bata dein?", order, is_complete=False)
-    check("5.x-a passthrough reply", passthrough == "Delivery address bata dein?")
+    passthrough = reply_text_for_tts("ڈیلیوری کا پتہ بتائیں؟", order, is_complete=False)
+    check("5.x-a passthrough reply", passthrough == "ڈیلیوری کا پتہ بتائیں؟")
+
+
+def test_5xf_tts_failure_preserves_order_state() -> None:
+    print("\n=== 5.x-f TTS failure preserves order ===")
+    order = Order()
+    messages = [{"role": "system", "content": build_system_prompt()}]
+
+    def fake_chat_turn(user_message, current_order, current_messages):
+        del user_message
+        add_item_to_order(current_order, "chicken-karahi", "full", 1)
+        return (
+            "آپ کا آرڈر شامل ہو گیا ہے۔",
+            current_order,
+            current_messages,
+            False,
+        )
+
+    with patch("app.agent.chat_turn", side_effect=fake_chat_turn), patch(
+        "app.agent.synthesize",
+        side_effect=TTSServiceError("Piper unavailable"),
+    ):
+        reply, audio, updated_order, _, complete = process_text_turn(
+            "ek chicken karahi",
+            order,
+            messages,
+        )
+
+    check("5.x-f reply preserved", reply == "آپ کا آرڈر شامل ہو گیا ہے۔")
+    check("5.x-f empty audio fallback", audio == b"")
+    check("5.x-f order preserved", len(updated_order.items) == 1)
+    check("5.x-f turn remains active", not complete)
+
+
+def test_5xg_system_prompt_requests_urdu_script() -> None:
+    print("\n=== 5.x-g Urdu-script system prompt ===")
+    prompt = build_system_prompt()
+    check("5.x-g requests Urdu script", "Urdu script" in prompt)
+    check("5.x-g no Latin-only rule", "ONLY the Latin alphabet" not in prompt)
 
 
 def test_5xb_process_text_turn_live() -> None:
     print("\n=== 5.x-b process_text_turn (live API) ===")
-    if not _api_key_ready():
-        skip("5.x-b", "OPENROUTER_API_KEY not set")
+    if not _llm_ready():
+        skip("5.x-b", f"{config.LLM_PROVIDER} LLM is not ready")
+        return
+    if not _piper_ready():
+        skip("5.x-b", "Piper TTS server is not running")
         return
 
     preload_models()
@@ -90,8 +145,11 @@ def test_5xb_process_text_turn_live() -> None:
 
 def test_5xc_multi_turn_live() -> None:
     print("\n=== 5.x-c multi-turn confirm (live API) ===")
-    if not _api_key_ready():
-        skip("5.x-c", "OPENROUTER_API_KEY not set")
+    if not _llm_ready():
+        skip("5.x-c", f"{config.LLM_PROVIDER} LLM is not ready")
+        return
+    if not _piper_ready():
+        skip("5.x-c", "Piper TTS server is not running")
         return
 
     order = Order()
@@ -116,8 +174,11 @@ def test_5xc_multi_turn_live() -> None:
 
 def test_5xd_invalid_item_live() -> None:
     print("\n=== 5.x-d invalid item (live API) ===")
-    if not _api_key_ready():
-        skip("5.x-d", "OPENROUTER_API_KEY not set")
+    if not _llm_ready():
+        skip("5.x-d", f"{config.LLM_PROVIDER} LLM is not ready")
+        return
+    if not _piper_ready():
+        skip("5.x-d", "Piper TTS server is not running")
         return
 
     order = Order()
@@ -134,8 +195,11 @@ def test_5xd_invalid_item_live() -> None:
 
 def test_5xe_latency_log() -> None:
     print("\n=== 5.x-e latency log path ===")
-    if not _api_key_ready():
-        skip("5.x-e", "OPENROUTER_API_KEY not set")
+    if not _llm_ready():
+        skip("5.x-e", f"{config.LLM_PROVIDER} LLM is not ready")
+        return
+    if not _piper_ready():
+        skip("5.x-e", "Piper TTS server is not running")
         return
 
     order = Order()
@@ -151,6 +215,8 @@ def test_5xe_latency_log() -> None:
 def main() -> None:
     print("Phase 5 automated tests")
     test_5xa_reply_text_for_tts()
+    test_5xf_tts_failure_preserves_order_state()
+    test_5xg_system_prompt_requests_urdu_script()
     test_5xb_process_text_turn_live()
     test_5xc_multi_turn_live()
     test_5xd_invalid_item_live()

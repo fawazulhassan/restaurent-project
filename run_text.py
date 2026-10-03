@@ -1,5 +1,7 @@
 from app.cli_utils import configure_stdout, print_order_summary
-from app.dialog import LLMRateLimitError, build_system_prompt, chat_turn
+from app.dialog import build_system_prompt, chat_turn
+from app.dialog_state import DialogState
+from app.llm import LLMRateLimitError, LLMServiceError
 from app.order import Order, build_confirmation_english, save_order
 
 
@@ -13,6 +15,7 @@ def main() -> None:
 
     order = Order()
     messages = [{"role": "system", "content": build_system_prompt()}]
+    dialog_state = DialogState()
 
     while True:
         try:
@@ -30,10 +33,13 @@ def main() -> None:
 
         try:
             reply, order, messages, is_complete = chat_turn(
-                user_input, order, messages
+                user_input, order, messages, dialog_state=dialog_state
             )
         except LLMRateLimitError as e:
             print(f"\nRate limit: {e}\n")
+            continue
+        except LLMServiceError as e:
+            print(f"\nLLM error: {e}\n")
             continue
         except Exception as e:
             print(f"\nError: {e}\n")

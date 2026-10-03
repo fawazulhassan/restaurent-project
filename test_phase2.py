@@ -1,4 +1,4 @@
-"""Automated Phase 2 integration tests against OpenRouter API."""
+"""Automated Phase 2 integration tests against the selected LLM provider."""
 import sys
 import time
 
@@ -6,7 +6,8 @@ reconfigure = getattr(sys.stdout, "reconfigure", None)
 if reconfigure is not None:
     reconfigure(encoding="utf-8")
 
-from app.dialog import LLMRateLimitError, build_system_prompt, chat_turn
+from app.dialog import build_system_prompt, chat_turn
+from app.llm import LLMRateLimitError, LLMServiceError
 from app.order import Order, OrderStatus, calculate_total
 
 PASS = 0
@@ -135,12 +136,15 @@ def test_2_8():
 
 
 if __name__ == "__main__":
-    print("Phase 2 integration tests (OpenRouter API)\n")
+    print("Phase 2 integration tests (selected hybrid provider)\n")
     tests = [test_2_1, test_2_2, test_2_3, test_2_4, test_2_5, test_2_6, test_2_7, test_2_8]
     for i, test_fn in enumerate(tests):
         try:
             test_fn()
         except LLMRateLimitError as e:
+            print(f"\n  SKIP  remaining tests — {e}\n")
+            break
+        except LLMServiceError as e:
             print(f"\n  SKIP  remaining tests — {e}\n")
             break
         except Exception as e:

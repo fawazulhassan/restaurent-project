@@ -1,5 +1,6 @@
 {
   "restaurant_name": "Kasur Kitchen",
+  "restaurant_name_urdu": "قصور کچن",
   "categories": [
     {
       "name": "Karahi",
@@ -8,9 +9,11 @@
           "id": "chicken-karahi",
           "name": "Chicken Karahi",
           "name_urdu": "چکن کڑاہی",
+          "spoken_name_urdu": "چکن کڑاہی",
+          "aliases": ["چکن کڑاہی", "chicken karahi"],
           "sizes": [
-            { "id": "half", "label": "Half", "price_pkr": 800 },
-            { "id": "full", "label": "Full", "price_pkr": 1400 }
+            { "id": "half", "label": "Half", "label_urdu": "آدھی", "price_pkr": 800 },
+            { "id": "full", "label": "Full", "label_urdu": "پوری", "price_pkr": 1400 }
           ],
           "available": true
         },
@@ -18,9 +21,11 @@
           "id": "mutton-karahi",
           "name": "Mutton Karahi",
           "name_urdu": "مٹن کڑاہی",
+          "spoken_name_urdu": "مٹن کڑاہی",
+          "aliases": ["مٹن کڑاہی", "mutton karahi"],
           "sizes": [
-            { "id": "half", "label": "Half", "price_pkr": 1200 },
-            { "id": "full", "label": "Full", "price_pkr": 2200 }
+            { "id": "half", "label": "Half", "label_urdu": "آدھی", "price_pkr": 1200 },
+            { "id": "full", "label": "Full", "label_urdu": "پوری", "price_pkr": 2200 }
           ],
           "available": true
         }
@@ -33,9 +38,11 @@
           "id": "chicken-biryani",
           "name": "Chicken Biryani",
           "name_urdu": "چکن بریانی",
+          "spoken_name_urdu": "چکن بریانی",
+          "aliases": ["چکن بریانی", "chicken biryani"],
           "sizes": [
-            { "id": "single", "label": "Single", "price_pkr": 350 },
-            { "id": "family", "label": "Family", "price_pkr": 1200 }
+            { "id": "single", "label": "Single", "label_urdu": "ایک پلیٹ", "price_pkr": 350 },
+            { "id": "family", "label": "Family", "label_urdu": "فیملی پیک", "price_pkr": 1200 }
           ],
           "available": true
         },
@@ -43,9 +50,11 @@
           "id": "beef-biryani",
           "name": "Beef Biryani",
           "name_urdu": "بیف بریانی",
+          "spoken_name_urdu": "بیف بریانی",
+          "aliases": ["بیف بریانی", "beef biryani"],
           "sizes": [
-            { "id": "single", "label": "Single", "price_pkr": 400 },
-            { "id": "family", "label": "Family", "price_pkr": 1400 }
+            { "id": "single", "label": "Single", "label_urdu": "ایک پلیٹ", "price_pkr": 400 },
+            { "id": "family", "label": "Family", "label_urdu": "فیملی پیک", "price_pkr": 1400 }
           ],
           "available": true
         }
@@ -57,20 +66,24 @@
         {
           "id": "chicken-tikka-pizza",
           "name": "Chicken Tikka Pizza",
-          "name_urdu": "چکن ٹکہ پیزا",
+          "name_urdu": "چکن تکہ پیزا",
+          "spoken_name_urdu": "چکن تکہ پیزا",
+          "aliases": ["چکن تکہ پیزا", "چکن ٹکہ پیزا", "chicken tikka pizza"],
           "sizes": [
-            { "id": "small", "label": "Small", "price_pkr": 800 },
-            { "id": "large", "label": "Large", "price_pkr": 1400 }
+            { "id": "small", "label": "Small", "label_urdu": "چھوٹا", "price_pkr": 800 },
+            { "id": "large", "label": "Large", "label_urdu": "بڑا", "price_pkr": 1400 }
           ],
           "available": true
         },
         {
           "id": "margherita-pizza",
           "name": "Margherita Pizza",
-          "name_urdu": "مارگیریٹا پیزا",
+          "name_urdu": "مارگریٹا پیزا",
+          "spoken_name_urdu": "مارگریٹا پیزا",
+          "aliases": ["مارگریٹا پیزا", "مارگیریٹا پیزا", "margherita pizza"],
           "sizes": [
-            { "id": "small", "label": "Small", "price_pkr": 700 },
-            { "id": "large", "label": "Large", "price_pkr": 1200 }
+            { "id": "small", "label": "Small", "label_urdu": "چھوٹا", "price_pkr": 700 },
+            { "id": "large", "label": "Large", "label_urdu": "بڑا", "price_pkr": 1200 }
           ],
           "available": true
         }
@@ -83,13 +96,17 @@
           "id": "plain-naan",
           "name": "Plain Naan",
           "name_urdu": "سادہ نان",
+          "spoken_name_urdu": "سادہ نان",
+          "aliases": ["سادہ نان", "plain naan"],
           "price_pkr": 50,
           "available": true
         },
         {
           "id": "garlic-naan",
           "name": "Garlic Naan",
-          "name_urdu": "لہسن نان",
+          "name_urdu": "لہسن والا نان",
+          "spoken_name_urdu": "لہسن والا نان",
+          "aliases": ["لہسن نان", "لہسن والا نان", "گارلک نان", "کالک نان", "کالکنان", "garlic naan"],
           "price_pkr": 80,
           "available": true
         }
@@ -101,31 +118,36 @@
         {
           "id": "coke-1-5l",
           "name": "1.5L Coke",
-          "name_urdu": "1.5 لیٹر کوک",
+          "name_urdu": "ڈیڑھ لیٹر کوک",
+          "spoken_name_urdu": "ڈیڑھ لیٹر کوک",
+          "aliases": [
+            "ڈیڑھ لیٹر کوک",
+            "ایک اعشاریہ پانچ لیٹر کوک",
+            "1.5 liter coke",
+            "1.5l coke",
+            "coke",
+            "cold drink",
+            "coldrink",
+            "کوک",
+            "کولڈ ڈرنک",
+            "کول ڈرنک",
+            "کولگرنگ",
+            "کالڈرنگ"
+          ],
           "price_pkr": 200,
           "available": true
         },
         {
           "id": "mint-margarita",
           "name": "Mint Margarita",
-          "name_urdu": "پودینہ مارگیریٹا",
+          "name_urdu": "پودینے والی مارگریٹا",
+          "spoken_name_urdu": "پودینے والی مارگریٹا",
+          "aliases": ["پودینہ مارگریٹا", "پودینے والی مارگریٹا", "منٹ مارگریٹا", "mint margarita"],
           "sizes": [
-            { "id": "regular", "label": "Regular", "price_pkr": 250 },
-            { "id": "large", "label": "Large", "price_pkr": 350 }
+            { "id": "regular", "label": "Regular", "label_urdu": "عام سائز", "price_pkr": 250 },
+            { "id": "large", "label": "Large", "label_urdu": "بڑا", "price_pkr": 350 }
           ],
           "available": true
-        }
-      ]
-    },
-    {
-      "name": "Test",
-      "items": [
-        {
-          "id": "test-unavailable-item",
-          "name": "Test Unavailable Item",
-          "name_urdu": "ٹیسٹ آئٹم",
-          "price_pkr": 100,
-          "available": false
         }
       ]
     },

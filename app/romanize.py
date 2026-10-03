@@ -10,13 +10,10 @@ _NON_LATIN_RE = re.compile(
     r"[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\u0900-\u097F]"
 )
 
-_openrouter = OpenAI(
-    base_url=config.OPENROUTER_BASE_URL,
-    api_key=config.OPENROUTER_API_KEY,
-    default_headers={
-        "HTTP-Referer": "http://localhost",
-        "X-Title": "Kasur Kitchen Voice Agent",
-    },
+_client = OpenAI(
+    api_key=config.OPENAI_API_KEY,
+    timeout=config.OPENAI_TIMEOUT_SECONDS,
+    max_retries=1,
 )
 
 
@@ -30,9 +27,9 @@ def to_roman_latin(text: str) -> str:
     if not text or not needs_latinize(text):
         return text
 
-    response = _openrouter.chat.completions.create(
-        model=config.OPENROUTER_MODEL,
-        messages=[
+    response = _client.responses.create(
+        model=config.OPENAI_MODEL,
+        input=[
             {
                 "role": "user",
                 "content": (
@@ -45,9 +42,11 @@ def to_roman_latin(text: str) -> str:
                 ),
             }
         ],
-        temperature=0,
+        reasoning={"effort": config.OPENAI_REASONING_EFFORT},
+        max_output_tokens=256,
+        store=False,
     )
-    out = (response.choices[0].message.content or "").strip()
+    out = response.output_text.strip()
     if out and not needs_latinize(out):
         return out
     return text
