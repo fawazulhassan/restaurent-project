@@ -97,7 +97,7 @@
           "name": "Plain Naan",
           "name_urdu": "سادہ نان",
           "spoken_name_urdu": "سادہ نان",
-          "aliases": ["سادہ نان", "plain naan"],
+          "aliases": ["سادہ نان", "plain naan", "نان", "naan", "nan"],
           "price_pkr": 50,
           "available": true
         },
@@ -154,13 +154,15 @@
     {
       "name": "Test",
       "items": [
-        {
-          "id": "test-unavailable-item",
-          "name": "Test Unavailable Item",
-          "name_urdu": "ٹیسٹ آئٹم",
-          "price_pkr": 100,
-          "available": false
-        }
+    {
+      "id": "test-unavailable-item",
+      "name": "Test Unavailable Item",
+      "name_urdu": "ٹیسٹ آئٹم",
+      "spoken_name_urdu": "ٹیسٹ آئٹم",
+      "aliases": [],
+      "price_pkr": 100,
+      "available": false
+    }
       ]
     }
   ]

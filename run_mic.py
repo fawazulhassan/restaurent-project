@@ -6,7 +6,7 @@ import config
 from app.agent import play_greeting, preload_models, process_text_turn
 from app.cli_utils import configure_stdout, print_order_summary
 from app.dialog import build_system_prompt
-from app.dialog_state import DialogState
+from app.dialog_state import DialogStage, DialogState
 from app.llm import LLMRateLimitError, LLMServiceError
 from app.order import Order, build_confirmation_english, save_order
 from app.stt import record_push_to_talk
@@ -96,6 +96,9 @@ def main() -> None:
 
         if reply_audio:
             play_audio(reply_audio)
+
+        if dialog_state.stage == DialogStage.HANDOFF:
+            break
 
         if is_complete:
             path = save_order(order)

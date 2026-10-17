@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 *.pyc
 .DS_Store
+logs/
 data/orders/*.json
-data/test_audio/
+data/test_audio/*.wav
 data/tts/*.wav

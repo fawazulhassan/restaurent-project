@@ -293,6 +293,10 @@ def change_item_size(
     candidate = order.model_copy(deep=True)
     remove_item_from_order(candidate, item_id, old_size_id)
     add_item_to_order(candidate, item_id, new_size_id, original_line.qty)
+    refreshed = validate_item(item_id, new_size_id)
+    for line in candidate.items:
+        if line.id == item_id and line.size == new_size_id:
+            line.unit_price_pkr = refreshed["unit_price_pkr"]
     order.items = candidate.items
     return order
 
@@ -309,9 +313,6 @@ def apply_order_update(order: Order, update: dict) -> Order:
     for entry in update.get("remove_items") or []:
         size_id = entry.get("size")
         remove_item_from_order(order, entry["id"], size_id)
-
-    if "delivery_address" in update and update["delivery_address"] is not None:
-        order.delivery_address = update["delivery_address"]
 
     if "special_instructions" in update and update["special_instructions"] is not None:
         order.special_instructions = update["special_instructions"]

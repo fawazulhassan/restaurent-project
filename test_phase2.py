@@ -83,6 +83,7 @@ def test_2_5():
     messages = [{"role": "system", "content": build_system_prompt()}]
     _, order, messages, _ = chat_turn("1 chicken biryani family", order, messages)
     _, order, messages, _ = chat_turn("Model Town Kasur house 45", order, messages)
+    _, order, messages, _ = chat_turn("haan", order, messages)
     _, order, messages, _ = chat_turn("haan confirm kar do", order, messages)
     check("2.5 confirmed", order.status == OrderStatus.CONFIRMED)
     check("2.5 has address", order.delivery_address is not None)
@@ -127,6 +128,7 @@ def test_2_8():
     messages = [{"role": "system", "content": build_system_prompt()}]
     _, order, messages, _ = chat_turn("2 chicken karahi full", order, messages)
     _, order, messages, _ = chat_turn("Model Town Kasur", order, messages)
+    _, order, messages, _ = chat_turn("ji", order, messages)
     reply, order, _, complete = chat_turn("ji confirm", order, messages)
     total = calculate_total(order)
     check("2.8 confirmed", order.status == OrderStatus.CONFIRMED)

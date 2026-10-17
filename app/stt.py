@@ -1,7 +1,11 @@
 import io
 import math
+import os
+import site
+import time
 from pathlib import Path
 
+import ctranslate2
 import httpx
 import numpy as np
 import scipy.io.wavfile
@@ -13,6 +17,95 @@ import config
 from app.romanize import to_roman_latin
 
 _MODEL: WhisperModel | None = None
+_CUDA_DLL_HANDLES = []
+
+
+class SttInitError(RuntimeError):
+    pass
+
+
+def _is_cuda_requested() -> bool:
+    return config.WHISPER_DEVICE.strip().lower() != "cpu"
+
+
+def _add_cuda_dll_directories() -> None:
+    if not _is_cuda_requested() or os.name != "nt":
+        return
+    candidates = [
+        Path(r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin"),
+        Path(r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.5\bin"),
+        Path(r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.4\bin"),
+    ]
+    for root in site.getsitepackages():
+        packages = Path(root) / "nvidia"
+        candidates.extend(
+            [
+                packages / "cublas" / "bin",
+                packages / "cudnn" / "bin",
+                packages / "cuda_nvrtc" / "bin",
+            ]
+        )
+    for path in candidates:
+        if not path.is_dir():
+            continue
+        path_str = str(path)
+        if path_str not in os.environ.get("PATH", ""):
+            os.environ["PATH"] = path_str + os.pathsep + os.environ.get("PATH", "")
+        if hasattr(os, "add_dll_directory"):
+            try:
+                _CUDA_DLL_HANDLES.append(os.add_dll_directory(path_str))
+            except OSError:
+                pass
+
+
+def _cuda_error_message(exc: Exception | str) -> str:
+    detail = str(exc)
+    return (
+        "Whisper CUDA failed to initialize with "
+        f"device={config.WHISPER_DEVICE} "
+        f"compute_type={config.WHISPER_COMPUTE_TYPE}. "
+        "Install/repair CUDA cuBLAS/cuDNN compatible with this CTranslate2 "
+        "version. CTranslate2 4.x typically needs CUDA 12 and cuDNN 9. "
+        "For older CUDA 11 setups, use ctranslate2==3.24.0, or switch "
+        "WHISPER_DEVICE=cpu and WHISPER_COMPUTE_TYPE=int8."
+        f" Details: {detail}"
+    )
+
+
+def _preflight_cuda() -> None:
+    if not _is_cuda_requested():
+        return
+    _add_cuda_dll_directories()
+    try:
+        if ctranslate2.get_cuda_device_count() <= 0:
+            raise SttInitError(_cuda_error_message("no CUDA device found"))
+        supported = ctranslate2.get_supported_compute_types("cuda")
+    except SttInitError:
+        raise
+    except Exception as exc:
+        raise SttInitError(_cuda_error_message(exc)) from exc
+    if config.WHISPER_COMPUTE_TYPE not in supported:
+        raise SttInitError(
+            _cuda_error_message(
+                f"compute type {config.WHISPER_COMPUTE_TYPE!r} not in {supported}"
+            )
+        )
+
+
+def _consume_segments(segments) -> list:
+    return list(segments)
+
+
+def _warm_up_model(model: WhisperModel) -> None:
+    samples = np.arange(config.SAMPLE_RATE, dtype=np.float32)
+    warmup_audio = 0.001 * np.sin(2 * np.pi * 440.0 * samples / config.SAMPLE_RATE)
+    kwargs = _transcribe_kwargs(roman_bias=False)
+    kwargs["vad_filter"] = False
+    segments, _ = model.transcribe(
+        warmup_audio.astype(np.float32),
+        **kwargs,
+    )
+    _consume_segments(segments)
 
 
 def get_model() -> WhisperModel:
@@ -20,12 +113,19 @@ def get_model() -> WhisperModel:
     global _MODEL
     if _MODEL is None:
         try:
+            _add_cuda_dll_directories()
+            _preflight_cuda()
             _MODEL = WhisperModel(
                 config.WHISPER_MODEL,
                 device=config.WHISPER_DEVICE,
                 compute_type=config.WHISPER_COMPUTE_TYPE,
             )
+            _warm_up_model(_MODEL)
+        except SttInitError:
+            raise
         except Exception as exc:
+            if _is_cuda_requested():
+                raise SttInitError(_cuda_error_message(exc)) from exc
             raise RuntimeError(
                 f"Could not load faster-whisper model '{config.WHISPER_MODEL}': {exc}"
             ) from exc
@@ -37,7 +137,11 @@ def preload_stt() -> None:
     if config.STT_PROVIDER == "whisper":
         print(f"Loading local Whisper STT ({config.WHISPER_MODEL})...")
         get_model()
-        print("Local Whisper STT ready.")
+        print(
+            "Local Whisper STT ready "
+            f"(device={config.WHISPER_DEVICE}, "
+            f"compute_type={config.WHISPER_COMPUTE_TYPE})."
+        )
         return
     if config.STT_PROVIDER == "elevenlabs":
         _require_elevenlabs_provider()
@@ -52,7 +156,7 @@ def preload_stt() -> None:
 def _normalize_audio(audio: np.ndarray) -> np.ndarray:
     arr = np.asarray(audio)
     if arr.ndim == 2:
-        arr = arr[:, 0]
+        arr = arr.mean(axis=1)
     if arr.dtype == np.int16:
         return arr.astype(np.float32) / 32768.0
     return arr.astype(np.float32, copy=False)
@@ -102,20 +206,32 @@ def _whisper_transcribe_audio(
             arr,
             **_transcribe_kwargs(roman_bias=roman_bias),
         )
-        return " ".join(segment.text.strip() for segment in segments).strip()
-    except RuntimeError:
+        materialized = _consume_segments(segments)
+        return " ".join(segment.text.strip() for segment in materialized).strip()
+    except RuntimeError as exc:
+        if _is_cuda_requested():
+            raise SttInitError(_cuda_error_message(exc)) from exc
         raise
     except Exception as exc:
         raise RuntimeError(f"Local Whisper STT failed: {exc}") from exc
 
 
+def _read_wav_for_transcription(path: Path) -> tuple[np.ndarray, int]:
+    try:
+        sample_rate, audio = scipy.io.wavfile.read(path)
+    except Exception as exc:
+        raise RuntimeError(f"Could not decode WAV file {path}: {exc}") from exc
+    return _resample_for_whisper(audio, int(sample_rate)), config.SAMPLE_RATE
+
+
 def _whisper_transcribe_file(path: Path, *, roman_bias: bool) -> str:
     try:
-        segments, _ = get_model().transcribe(
-            str(path),
-            **_transcribe_kwargs(roman_bias=roman_bias),
+        audio, sample_rate = _read_wav_for_transcription(path)
+        return _whisper_transcribe_audio(
+            audio,
+            sample_rate,
+            roman_bias=roman_bias,
         )
-        return " ".join(segment.text.strip() for segment in segments).strip()
     except RuntimeError:
         raise
     except Exception as exc:
@@ -235,6 +351,23 @@ def transcribe_audio(
     return _finalize_transcript(text, latinize=latinize)
 
 
+def transcribe_audio_timed(
+    audio: np.ndarray,
+    sample_rate: int = 16000,
+    *,
+    roman_bias: bool = True,
+    latinize: bool | None = None,
+) -> tuple[str, float]:
+    start = time.perf_counter()
+    text = transcribe_audio(
+        audio,
+        sample_rate,
+        roman_bias=roman_bias,
+        latinize=latinize,
+    )
+    return text, time.perf_counter() - start
+
+
 def transcribe_file(
     wav_path: str | Path,
     *,
@@ -256,6 +389,17 @@ def transcribe_file(
             "Use 'whisper' or 'elevenlabs'."
         )
     return _finalize_transcript(text, latinize=latinize)
+
+
+def transcribe_file_timed(
+    wav_path: str | Path,
+    *,
+    roman_bias: bool = True,
+    latinize: bool | None = None,
+) -> tuple[str, float]:
+    start = time.perf_counter()
+    text = transcribe_file(wav_path, roman_bias=roman_bias, latinize=latinize)
+    return text, time.perf_counter() - start
 
 
 def record_and_transcribe(
@@ -291,6 +435,28 @@ def record_and_transcribe(
     return transcribe_audio(
         arr, config.SAMPLE_RATE, roman_bias=roman_bias, latinize=latinize
     )
+
+
+def record_clip(path: str | Path, seconds: float, *, force: bool = False) -> Path:
+    out = Path(path)
+    if out.exists() and not force:
+        raise FileExistsError(f"Refusing to overwrite existing clip: {out}")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    frames = int(seconds * config.SAMPLE_RATE)
+    try:
+        audio = sd.rec(
+            frames,
+            samplerate=config.SAMPLE_RATE,
+            channels=1,
+            dtype="float32",
+        )
+        sd.wait()
+    except sd.PortAudioError:
+        raise RuntimeError(
+            "Microphone not accessible — check Windows Privacy settings."
+        ) from None
+    scipy.io.wavfile.write(out, config.SAMPLE_RATE, _normalize_audio(audio))
+    return out
 
 
 def record_push_to_talk(

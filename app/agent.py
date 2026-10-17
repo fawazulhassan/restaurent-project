@@ -10,7 +10,7 @@ import numpy as np
 
 import config
 from app.dialog import build_system_prompt, chat_turn
-from app.dialog_state import DialogState
+from app.dialog_state import DialogStage, DialogState
 from app.llm import LLMRateLimitError, LLMServiceError, preload_llm
 from app.order import Order, build_confirmation_urdu, save_order
 from app.stt import preload_stt, transcribe_audio
@@ -72,6 +72,10 @@ def process_text_turn(
                 f"tts={t_tts - t_llm:.1f}s total={t_tts - t0:.1f}s "
                 f"path={dialog_state.last_path}"
             )
+            if dialog_state.last_address_extraction_detail:
+                print(f"  [address] {dialog_state.last_address_extraction_detail}")
+            if dialog_state.last_basket_edit_detail:
+                print(f"  [basket_edit] {dialog_state.last_basket_edit_detail}")
         else:
             print(
                 f"  [latency] llm={t_llm - t0:.1f}s "
@@ -184,6 +188,9 @@ def run_conversation(
             print(f"\nAI: {reply_text}\n")
             if reply_audio:
                 play_audio(reply_audio)
+
+        if dialog_state.stage == DialogStage.HANDOFF:
+            return None
 
         if is_complete:
             path = save_order(order)

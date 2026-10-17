@@ -6,10 +6,10 @@ import config
 from app.agent import play_greeting, preload_models, process_text_turn
 # from app.cli_utils import configure_stdout, print_order_summary
 from app.dialog import build_system_prompt
-from app.dialog_state import DialogState
+from app.dialog_state import DialogStage, DialogState
 from app.llm import LLMRateLimitError, LLMServiceError
 from app.order import Order, build_confirmation_english, save_order
-from app.stt import record_and_transcribe
+from app.stt import SttInitError, record_and_transcribe
 from app.tts import play_audio
 
 QUIT_WORDS = frozenset({"quit", "exit", "band", "bye"})
@@ -24,6 +24,9 @@ def listen(seconds: float) -> str:
             roman_bias=True,
             latinize=False,
         )
+    except SttInitError as e:
+        print(f"STT runtime error: {e}")
+        raise SystemExit(1) from e
     except RuntimeError as e:
         print(f"Mic error: {e}")
         return ""
@@ -59,6 +62,9 @@ def main() -> None:
 
     try:
         preload_models()
+    except SttInitError as e:
+        print(f"STT startup error: {e}")
+        raise SystemExit(1)
     except LLMServiceError as e:
         print(f"LLM startup error: {e}")
         return
@@ -112,6 +118,9 @@ def main() -> None:
 
         if reply_audio:
             play_audio(reply_audio)
+
+        if dialog_state.stage == DialogStage.HANDOFF:
+            break
 
         if is_complete:
             path = save_order(order)

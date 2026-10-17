@@ -1,6 +1,6 @@
 from app.cli_utils import configure_stdout, print_order_summary
 from app.dialog import build_system_prompt, chat_turn
-from app.dialog_state import DialogState
+from app.dialog_state import DialogStage, DialogState
 from app.llm import LLMRateLimitError, LLMServiceError
 from app.order import Order, build_confirmation_english, save_order
 
@@ -47,6 +47,9 @@ def main() -> None:
 
         print(f"\nAI: {reply}\n")
         print_order_summary(order)
+
+        if dialog_state.stage == DialogStage.HANDOFF:
+            break
 
         if is_complete:
             path = save_order(order)
