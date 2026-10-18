@@ -6,13 +6,34 @@ from pathlib import Path
 
 import config
 
+HISTORY_MAX_PAIRS = 6
+HISTORY_TEXT_LIMIT = 300
+
 _AMBIGUOUS_LLM_ALLOWED: contextvars.ContextVar[bool] = contextvars.ContextVar(
     "ambiguous_llm_allowed",
     default=True,
 )
+_BASKET_EDITOR_ALLOWED: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "basket_editor_allowed",
+    default=True,
+)
+_LOCAL_ALLOW_FALLBACK: contextvars.ContextVar[bool] = contextvars.ContextVar(
+    "local_allow_fallback",
+    default=True,
+)
 from app.basket_edit import BasketEdit, apply_basket_edits
-from app.confirmation_urdu import classify_address_confirmation, classify_confirmation_reply, classify_more_items_reply, classify_order_confirmation, load_menu_noise
-from app.dialog_state import DialogStage, DialogState, ItemRequest, PendingChoice, infer_dialog_state
+from app.confirmation_urdu import (
+    CONFIRM_ACT,
+    NO_PHRASES,
+    ORDER_FILLER,
+    YES_PHRASES,
+    classify_address_confirmation,
+    classify_confirmation_reply,
+    classify_more_items_reply,
+    classify_order_confirmation,
+    load_menu_noise,
+)
+from app.dialog_state import DialogStage, DialogState, HistoryTurn, ItemRequest, PendingChoice, infer_dialog_state
 from app.intent import (
     IntentType,
     ParsedIntent,
@@ -42,6 +63,7 @@ from app.llm import (
     resolve_basket_edits,
 )
 from app.numbers_urdu import number_to_urdu_words
+from app.text_fold import compare_tokens
 from app.order import (
     Order,
     OrderError,
@@ -58,10 +80,12 @@ from app.order import (
 from app.replies import (
     ASK_ADDRESS_URDU,
     ASK_CLARIFY_URDU,
+    MENU_OFFER_URDU,
     ASK_CONFIRM_URDU,
     ASK_MORE_ITEMS_URDU,
     ASK_ORDER_URDU,
     ASK_QUANTITY_URDU,
+    ASK_CANCEL_CONFIRM_URDU,
     ASK_WHAT_TO_CHANGE_URDU,
     EMPTY_ORDER_URDU,
     HUMAN_HANDOFF_CONFIRM_URDU,
@@ -601,21 +625,30 @@ def _apply_additions(
     return build_update_reply_urdu(order, state, "add"), False
 
 
+def _close_more_items(order: Order, state: DialogState) -> tuple[str, bool]:
+    """The more-items "no" path. Does not save or clear the basket."""
+    state.basket_edit_context = []
+    state.quantity_correction_item_id = None
+    state.quantity_correction_size_id = None
+    state.quantity_correction_action = "set"
+    if not order.items:
+        state.stage = DialogStage.ORDERING
+        state.summary_presented = False
+        return ASK_ORDER_URDU, False
+    if order.delivery_address:
+        state.enter_confirmation()
+        state.summary_presented = True
+        return build_verified_summary_urdu(order, ask_for_confirmation=True), False
+    state.stage = DialogStage.AWAITING_ADDRESS
+    return ASK_ADDRESS_URDU, False
+
+
 def _handle_more_items_turn(user_message: str, order: Order, state: DialogState) -> tuple[str, bool] | None:
     if state.stage != DialogStage.AWAITING_MORE_ITEMS:
         return None
     answer = classify_more_items_reply(user_message)
     if answer == "no":
-        state.basket_edit_context = []
-        state.quantity_correction_item_id = None
-        state.quantity_correction_size_id = None
-        state.quantity_correction_action = "set"
-        if order.delivery_address:
-            state.enter_confirmation()
-            state.summary_presented = True
-            return build_verified_summary_urdu(order, ask_for_confirmation=True), False
-        state.stage = DialogStage.AWAITING_ADDRESS
-        return ASK_ADDRESS_URDU, False
+        return _close_more_items(order, state)
     if answer == "yes":
         return "آپ مزید کیا شامل کرنا چاہیں گے؟", False
     # A new item named directly goes to the normal parser without a separate yes.
@@ -807,6 +840,8 @@ def _dispatch_deterministic_intent(
         return UNAVAILABLE_ITEM_URDU, False
 
     if intent.intent == IntentType.AMBIGUOUS and intent.clarification_reason == "basket_edit":
+        if not _editor_enabled():
+            return ASK_CLARIFY_URDU, False
         return _resolve_basket_change(intent, user_message, order, state)
 
     if intent.intent == IntentType.REDUCE_QUANTITY:
@@ -1137,6 +1172,28 @@ def _accept_own_action(decision, state: DialogState, intent: ParsedIntent) -> bo
     return True
 
 
+def _clip_history_text(text: str) -> str:
+    return text[:HISTORY_TEXT_LIMIT]
+
+
+def _record_history(state: DialogState, user_message: str, reply: str, intent: ParsedIntent) -> None:
+    """Append one pair, then drop history when the call is over."""
+    state.agent_turns += 1
+    state.history.append(HistoryTurn(
+        role="customer",
+        text=_clip_history_text(_redacted_utterance(user_message, state, intent)),
+    ))
+    spoken = _clip_history_text(reply)
+    state.history.append(HistoryTurn(role="assistant", text=spoken))
+    state.last_reply = spoken
+    extra = len(state.history) - HISTORY_MAX_PAIRS * 2
+    if extra > 0:
+        del state.history[:extra]
+    if state.stage in {DialogStage.COMPLETE, DialogStage.HANDOFF}:
+        state.history.clear()
+        state.last_reply = ""
+
+
 def _redacted_utterance(user_message: str, state: DialogState, intent: ParsedIntent) -> str:
     if (
         state.stage in {DialogStage.AWAITING_ADDRESS, DialogStage.AWAITING_ADDRESS_CONFIRMATION}
@@ -1252,7 +1309,7 @@ def _accept_order_confirmation(order: Order, state: DialogState) -> tuple[str, b
 
 
 def _editor_enabled() -> bool:
-    return bool(config.BASKET_EDIT_LLM_ENABLED)
+    return bool(config.BASKET_EDIT_LLM_ENABLED) and _BASKET_EDITOR_ALLOWED.get()
 
 
 def _mutation_applied(state: DialogState) -> bool:
@@ -1295,7 +1352,7 @@ def _apply_local_edit(
     before_order = order.model_dump()
     stage_before = state.stage
     reply, complete = _dispatch_deterministic_intent(
-        intent, user_message, order, state, allow_fallback=True,
+        intent, user_message, order, state, allow_fallback=_LOCAL_ALLOW_FALLBACK.get(),
     )
     if order.model_dump() != before_order and bool(before_order["items"]):
         kind = "local_remove" if intent.intent == IntentType.REMOVE_ITEM else "local_add"
@@ -1458,6 +1515,222 @@ def _local_confirmation_reply(order: Order, state: DialogState) -> tuple[str, bo
     return _confirmation_summary(order, state), False
 
 
+def _utterance_is_noise(text: str) -> bool:
+    return not compare_tokens(text)
+
+
+_QUESTION_MARKERS = frozenset(
+    token
+    for word in (
+        "کیا", "کیوں", "کب", "کہاں", "کون", "کیسے", "کتنے", "کتنی",
+        "kya", "kyun", "kab", "kahan", "kaun", "kaise", "kitne", "kitni",
+        "what", "when", "where", "who", "why", "how", "which",
+    )
+    for token in compare_tokens(word)
+)
+
+
+def _is_customer_question(text: str) -> bool:
+    """؟, a leading کیا, or one interrogative token. Slot answers are decided first."""
+    if "؟" in text or text.strip().startswith("کیا"):
+        return True
+    return any(token in _QUESTION_MARKERS for token in compare_tokens(text))
+
+
+_SLOT_WORDS = frozenset(
+    token
+    for phrase in (*YES_PHRASES, *NO_PHRASES, *ORDER_FILLER, *CONFIRM_ACT)
+    for token in compare_tokens(phrase)
+)
+_TOTAL_WORDS = ("ٹوٹل", "total", "بل", "کل رقم", "کتنا")
+
+
+def _bare_slot_reply(text: str) -> bool:
+    """Every folded token is a yes/no phrase, filler, confirm word, or a size word."""
+    tokens = compare_tokens(text)
+    if not tokens:
+        return False
+    return all(token in _SLOT_WORDS or bool(sizes_in_text(token)) for token in tokens)
+
+
+def _has_total_word(text: str) -> bool:
+    tokens = compare_tokens(text)
+    for word in _TOTAL_WORDS:
+        wanted = compare_tokens(word)
+        if wanted and any(tokens[index:index + len(wanted)] == wanted for index in range(len(tokens) - len(wanted) + 1)):
+            return True
+    return False
+
+
+def _mixed_no_close(text: str, order: Order) -> bool:
+    """A no plus a question or a total, and no new item. A new item stays an add."""
+    tokens = compare_tokens(text)
+    if "نہیں" not in tokens and "no" not in tokens:
+        return False
+    if any(item_id not in {line.id for line in order.items} for item_id in mentioned_item_ids(text)):
+        return False
+    return _is_customer_question(text) or _has_total_word(text)
+
+
+def _reset_food_repeat(state: DialogState) -> None:
+    state.food_repeat_count = 0
+    state.food_repeat_question = ""
+
+
+def _food_repeat_reply(state: DialogState, question: str) -> str:
+    """The 3rd consecutive repeat of the same question asks for a clearer order."""
+    changed = bool(state.food_repeat_question) and state.food_repeat_question != question
+    if state.food_repeat_question != question:
+        state.food_repeat_question = question
+        state.food_repeat_count = 0
+        if changed:
+            return question
+    state.food_repeat_count += 1
+    if state.food_repeat_count >= 3:
+        _reset_food_repeat(state)
+        return f"{ASK_CLARIFY_URDU} {MENU_OFFER_URDU}"
+    return question
+
+
+def _current_food_question(order: Order, state: DialogState) -> str:
+    if state.pending_item_id and (item := _menu_item(state.pending_item_id)):
+        return build_missing_size_urdu(item)
+    if state.stage == DialogStage.AWAITING_MORE_ITEMS and order.items:
+        return ASK_MORE_ITEMS_URDU
+    return ASK_ORDER_URDU
+
+
+def _safe_parsed_add(intent: ParsedIntent) -> bool:
+    if intent.dropped_unknown or intent.clarification_reason in {
+        "item_choice", "choice_retry", "choice_selected", "multiple_items", "no_safe_rule", "missing_size",
+    }:
+        return False
+    if intent.intent == IntentType.ADD_ITEMS and intent.add_items:
+        return all(part.item_id for part in intent.add_items)
+    return intent.intent == IntentType.ADD_ITEM and bool(intent.item_id)
+
+
+def _upsert_pending(state: DialogState, request: ItemRequest) -> None:
+    """Append one staged line. Does not move staged_start_index."""
+    for existing in state.pending_additions:
+        if existing.item_id == request.item_id and existing.size_id == request.size_id:
+            existing.quantity = request.quantity
+            return
+    state.pending_additions.append(request.model_copy(deep=True))
+
+
+def _merge_parsed_additions(user_text: str, order: Order, state: DialogState) -> None:
+    """Stage parser items once. The parser quantity wins when the pair is already staged."""
+    intent = parse_customer_intent(user_text, state, order)
+    requests = list(intent.add_items or [])
+    if not requests and intent.intent == IntentType.ADD_ITEM and intent.item_id:
+        requests = [ItemRequest(
+            item_id=intent.item_id, size_id=intent.size_id, quantity=intent.quantity or 1,
+        )]
+    for request in requests:
+        pending = next(
+            (part for part in state.pending_additions
+             if part.item_id == request.item_id and part.size_id == request.size_id),
+            None,
+        )
+        if pending is not None:
+            pending.quantity = request.quantity
+            continue
+        if any(line.id == request.item_id and line.size == request.size_id for line in order.items):
+            continue
+        state.pending_additions.append(request.model_copy(deep=True))
+
+
+def _agent_local_first(user_message: str, state: DialogState, intent: ParsedIntent, confirmation: str) -> bool:
+    """Turns the tool agent must not see. Today's handlers answer them."""
+    if _bare_slot_reply(user_message) and confirmation in {"yes", "no"}:
+        return True
+    if (
+        state.stage == DialogStage.AWAITING_MORE_ITEMS
+        and _bare_slot_reply(user_message)
+        and classify_more_items_reply(user_message) in {"yes", "no"}
+    ):
+        return True
+    if state.stage == DialogStage.AWAITING_ORDER_CHANGE:
+        return True
+    if state.stage == DialogStage.AWAITING_SIZE and sizes_in_text(normalize_customer_text(user_message)[0]):
+        return True
+    if intent.clarification_reason == "choice_selected":
+        return True
+    if state.stage in {DialogStage.AWAITING_ADDRESS, DialogStage.AWAITING_ADDRESS_CONFIRMATION}:
+        if _is_customer_question(user_message):
+            return False
+        return True
+    if state.stage == DialogStage.AWAITING_CANCEL_CONFIRM:
+        return True
+    if intent.clarification_reason == "quantity_correction":
+        return True
+    if intent.dropped_unknown or intent.intent == IntentType.UNKNOWN_ITEM:
+        if _is_customer_question(user_message):
+            return False
+        return True
+    if state.stage == DialogStage.AWAITING_CONFIRMATION and not _is_customer_question(user_message):
+        return True
+    if _utterance_is_noise(user_message):
+        return True
+    return False
+
+
+def _agent_should_run(state: DialogState) -> bool:
+    if state.agent_turns >= config.AGENT_MAX_TURNS_PER_CALL - 1:
+        return False
+    if state.reply_streak >= 3 and config.TOOL_AGENT_ENABLED:
+        return False
+    return bool(config.TOOL_AGENT_ENABLED or config.AGENT_SHADOW_MODE)
+
+
+def _commit_agent_trial(order: Order, state: DialogState, trial_order: Order, trial_state: DialogState) -> None:
+    order.items = trial_order.items
+    order.delivery_address = trial_order.delivery_address
+    order.special_instructions = trial_order.special_instructions
+    order.customer_phone = trial_order.customer_phone
+    order.status = trial_order.status
+    for name in type(trial_state).model_fields:
+        setattr(state, name, getattr(trial_state, name))
+
+
+def _cancel_confirmation_reply(user_message: str, order: Order, state: DialogState) -> tuple[str, bool]:
+    decision = classify_order_confirmation(user_message)
+    if decision == "yes":
+        order.items.clear()
+        state.clear_pending_size()
+        state.clear_pending_choice()
+        state.pending_additions.clear()
+        state.size_attempts = 0
+        state.choice_attempts = 0
+        state.cancel_resume_stage = None
+        state.stage = DialogStage.ORDERING
+        state.summary_presented = False
+        return ASK_ORDER_URDU, False
+    if decision == "no":
+        state.stage = state.cancel_resume_stage or DialogStage.ORDERING
+        state.cancel_resume_stage = None
+        return "ٹھیک ہے، آرڈر ویسے ہی رہے گا۔", False
+    return ASK_CANCEL_CONFIRM_URDU, False
+
+
+def _log_agent_turn(user_message: str, state: DialogState, intent: ParsedIntent, outcome, path: str) -> None:
+    from app.agent_loop import record_agent_turn
+
+    record_agent_turn({
+        "utterance": _redacted_utterance(user_message, state, intent),
+        "stage": state.stage.value,
+        "tool_calls": outcome.tool_log,
+        "rounds": outcome.rounds,
+        "latency": outcome.latency,
+        "final_text": outcome.final_text,
+        "validation": outcome.validation,
+        "fallback_reason": outcome.reason,
+        "final_path": path,
+        "applied": outcome.applied,
+    })
+
+
 def _chat_turn_hybrid(
     user_message: str,
     order: Order,
@@ -1468,21 +1741,92 @@ def _chat_turn_hybrid(
     state.last_llm_seconds = 0.0
     state.last_address_extraction_detail = ""
     state.last_basket_edit_detail = ""
+    _BASKET_EDITOR_ALLOWED.set(True)
+    _LOCAL_ALLOW_FALLBACK.set(True)
     messages.append({"role": "user", "content": user_message})
 
     if state.stage == DialogStage.HANDOFF:
         state.reply_streak = 0
         state.last_parser_seconds = 0.0
-        messages.append({"role": "assistant", "content": HUMAN_HANDOFF_URDU})
-        return HUMAN_HANDOFF_URDU, order, messages, False
+        intent = ParsedIntent(intent=IntentType.AMBIGUOUS, confidence=0)
+        return _finish_hybrid_turn(
+            user_message, order, messages, state, intent, None, HUMAN_HANDOFF_URDU, False,
+        )
 
     _AMBIGUOUS_LLM_ALLOWED.set(True)
     parser_start = time.perf_counter()
     intent = parse_customer_intent(user_message, state, order)
     state.last_parser_seconds = time.perf_counter() - parser_start
     confirmation = classify_order_confirmation(user_message)
+    if config.TOOL_AGENT_ENABLED and _utterance_is_noise(user_message):
+        return _finish_hybrid_turn(
+            user_message, order, messages, state, intent, None, ASK_CLARIFY_URDU, False,
+        )
+    if state.stage == DialogStage.AWAITING_CANCEL_CONFIRM:
+        reply, complete = _cancel_confirmation_reply(user_message, order, state)
+        return _finish_hybrid_turn(
+            user_message, order, messages, state, intent, None, reply, complete,
+        )
+    local_first = _agent_local_first(user_message, state, intent, confirmation)
+    use_today_model = True
+    if _agent_should_run(state) and not local_first:
+        from app.agent_loop import run_agent_turn
+
+        if config.TOOL_AGENT_ENABLED:
+            use_today_model = False
+            outcome = run_agent_turn(user_message, order, state)
+            _log_agent_turn(user_message, state, intent, outcome, "agent" if outcome.ok else "fallback")
+            state.last_llm_seconds = outcome.latency
+            if outcome.ok and outcome.applied:
+                if outcome.order is not None and outcome.order is not order and outcome.state is not None:
+                    _commit_agent_trial(order, state, outcome.order, outcome.state)
+                state.last_path = "agent"
+                state.agent_failure_streak = 0
+                return _finish_hybrid_turn(
+                    user_message, order, messages, state, intent, None, outcome.reply, False,
+                    agent_text_only=outcome.text_only,
+                )
+            state.agent_failure_streak += 1
+            if outcome.basket_detail:
+                state.last_basket_edit_detail = outcome.basket_detail
+            if state.stage in {DialogStage.ORDERING, DialogStage.AWAITING_MORE_ITEMS}:
+                _BASKET_EDITOR_ALLOWED.set(False)
+                _LOCAL_ALLOW_FALLBACK.set(False)
+                _AMBIGUOUS_LLM_ALLOWED.set(False)
+                if _safe_parsed_add(intent):
+                    reply, complete = _dispatch_deterministic_intent(
+                        intent, user_message, order, state, allow_fallback=False,
+                    )
+                    return _finish_hybrid_turn(
+                        user_message, order, messages, state, intent, None, reply, complete,
+                    )
+                reply = _food_repeat_reply(state, _current_food_question(order, state))
+                return _finish_hybrid_turn(
+                    user_message, order, messages, state, intent, None, reply, False,
+                    keep_food_repeat=True,
+                )
+            if state.agent_failure_streak >= 3:
+                state.agent_failure_streak = 0
+                state.reply_streak = 0
+                state.stage = DialogStage.HANDOFF
+                return _finish_hybrid_turn(
+                    user_message, order, messages, state, intent, None, HUMAN_HANDOFF_URDU, False,
+                )
+            _BASKET_EDITOR_ALLOWED.set(False)
+            _LOCAL_ALLOW_FALLBACK.set(False)
+            _AMBIGUOUS_LLM_ALLOWED.set(False)
+            if state.stage == DialogStage.AWAITING_MORE_ITEMS and _is_customer_question(user_message):
+                return _finish_hybrid_turn(
+                    user_message, order, messages, state, intent, None, ASK_MORE_ITEMS_URDU, False,
+                )
+        elif config.AGENT_SHADOW_MODE:
+            outcome = run_agent_turn(user_message, order, state, shadow=True)
+            _log_agent_turn(user_message, state, intent, outcome, "shadow")
+    elif config.TOOL_AGENT_ENABLED and local_first:
+        use_today_model = False
     skip_model = (
-        not config.LLM_TURN_HANDLER_ENABLED
+        not use_today_model
+        or not config.LLM_TURN_HANDLER_ENABLED
         or confirmation in {"yes", "no"}
         or intent.clarification_reason == "quantity_correction"
         or intent.dropped_unknown
@@ -1540,6 +1884,8 @@ def _chat_turn_hybrid(
         )
         if intent.clarification_reason == "item_choice":
             reply, complete = _open_item_choice(intent, state)
+            if intent.dropped_unknown:
+                reply = f"{UNAVAILABLE_ITEM_URDU} {reply}"
         elif intent.clarification_reason == "choice_retry":
             reply, complete = _reask_item_choice(order, state)
         elif intent.clarification_reason == "choice_selected":
@@ -1557,7 +1903,7 @@ def _chat_turn_hybrid(
         elif (local := _apply_local_edit(user_message, order, state)) is not None:
             reply, complete = local
         elif (
-            config.BASKET_EDIT_LLM_ENABLED and order.items and not state.pending_item_id
+            _editor_enabled() and order.items and not state.pending_item_id
             and not state.pending_choices
             and not local_quantity_answer
             and intent.intent not in {
@@ -1573,7 +1919,7 @@ def _chat_turn_hybrid(
             reply, complete = _resolve_basket_change(intent, user_message, order, state)
         else:
             reply, complete = _dispatch_deterministic_intent(
-                intent, user_message, order, state, allow_fallback=True,
+                intent, user_message, order, state, allow_fallback=_LOCAL_ALLOW_FALLBACK.get(),
             )
     return _finish_hybrid_turn(
         user_message, order, messages, state, intent, model_decision, reply, complete,
@@ -1589,8 +1935,13 @@ def _finish_hybrid_turn(
     model_decision,
     reply: str,
     complete: bool,
+    *,
+    agent_text_only: bool = False,
+    keep_food_repeat: bool = False,
 ) -> tuple[str, Order, list[dict], bool]:
-    spoke_reply = (
+    if state.stage == DialogStage.HANDOFF or not keep_food_repeat:
+        _reset_food_repeat(state)
+    spoke_reply = agent_text_only or (
         model_decision is not None
         and model_decision.action == "reply"
         and model_decision.validation == "ok"
@@ -1600,6 +1951,7 @@ def _finish_hybrid_turn(
         state.reply_streak += 1
     else:
         state.reply_streak = 0
+    _record_history(state, user_message, reply, intent)
     if model_decision is not None:
         record_model_turn({
             "utterance": _redacted_utterance(user_message, state, intent),

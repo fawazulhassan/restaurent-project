@@ -16,6 +16,7 @@ def address_extraction_test_mode(request, monkeypatch):
     # Historical parser tests cover the supported deterministic opt-out mode;
     # generic editor tests mock only the API transport and exercise default routing.
     monkeypatch.setattr(config, "BASKET_EDIT_LLM_ENABLED", request.node.path.name == "test_basket_edits.py")
+    monkeypatch.setattr(config, "TOOL_AGENT_ENABLED", False)
 
 
 @pytest.fixture(autouse=True)

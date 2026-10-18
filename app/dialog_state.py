@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -17,8 +18,14 @@ class DialogStage(str, Enum):
     AWAITING_ADDRESS_CONFIRMATION = "awaiting_address_confirmation"
     AWAITING_CONFIRMATION = "awaiting_confirmation"
     AWAITING_ORDER_CHANGE = "awaiting_order_change"
+    AWAITING_CANCEL_CONFIRM = "awaiting_cancel_confirm"
     COMPLETE = "complete"
     HANDOFF = "handoff"
+
+
+class HistoryTurn(BaseModel):
+    role: Literal["customer", "assistant"]
+    text: str
 
 
 class ItemRequest(BaseModel):
@@ -51,6 +58,13 @@ class DialogState(BaseModel):
     order_confirmation_attempts: int = 0
     order_change_failures: int = 0
     reply_streak: int = 0
+    history: list[HistoryTurn] = Field(default_factory=list)
+    last_reply: str = ""
+    agent_failure_streak: int = 0
+    food_repeat_count: int = 0
+    food_repeat_question: str = ""
+    agent_turns: int = 0
+    cancel_resume_stage: DialogStage | None = None
     size_attempts: int = 0
     pending_choices: list[str] = Field(default_factory=list)
     pending_choice_quantity: int = 0
@@ -131,7 +145,11 @@ class DialogState(BaseModel):
         self.stage = DialogStage.AWAITING_ORDER_CHANGE
 
     def sync_stage(self, order: Order) -> None:
-        if self.stage in {DialogStage.HANDOFF, DialogStage.AWAITING_ORDER_CHANGE}:
+        if self.stage in {
+            DialogStage.HANDOFF,
+            DialogStage.AWAITING_ORDER_CHANGE,
+            DialogStage.AWAITING_CANCEL_CONFIRM,
+        }:
             return
         if self.pending_address:
             self.stage = DialogStage.AWAITING_ADDRESS_CONFIRMATION
