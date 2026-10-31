@@ -33,6 +33,7 @@ class Order(BaseModel):
     items: list[OrderItem] = []
     delivery_address: str | None = None
     special_instructions: str | None = None
+    complaint: str = ""
     customer_phone: str | None = None
     status: OrderStatus = OrderStatus.IN_PROGRESS
 

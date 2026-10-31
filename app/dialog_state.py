@@ -63,6 +63,7 @@ class DialogState(BaseModel):
     agent_failure_streak: int = 0
     food_repeat_count: int = 0
     food_repeat_question: str = ""
+    unmatched_words: list[str] = Field(default_factory=list)
     agent_turns: int = 0
     cancel_resume_stage: DialogStage | None = None
     size_attempts: int = 0

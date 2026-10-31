@@ -223,6 +223,40 @@ def _finish_items_speech(tool_log: list[dict[str, Any]]) -> str:
     return ""
 
 
+def _append_slot_question(reply: str, model_sentence: str, state: DialogState) -> str:
+    """Append a size or choice builder only when the sentence did not already ask it."""
+    from app.dialog import _choice_question, _menu_item, build_item_choice_urdu, build_missing_size_urdu
+
+    from app.replies import ASK_CANCEL_CONFIRM_URDU
+
+    folded = fold_text(model_sentence)
+    if state.stage == DialogStage.AWAITING_CANCEL_CONFIRM:
+        if ASK_CANCEL_CONFIRM_URDU not in reply:
+            return f"{reply} {ASK_CANCEL_CONFIRM_URDU}".strip()
+        return reply
+    if state.stage == DialogStage.AWAITING_SIZE and state.pending_item_id and (item := _menu_item(state.pending_item_id)):
+        name = fold_text(item.get("spoken_name_urdu") or item.get("name_urdu") or "")
+        labels = [fold_text(size.get("label_urdu") or "") for size in item.get("sizes", [])]
+        labels = [label for label in labels if label]
+        asked = bool(name and name in folded and any(label in folded for label in labels))
+        question = build_missing_size_urdu(item)
+        if not asked and question not in reply:
+            return f"{reply} {question}".strip()
+        return reply
+    if state.pending_choices:
+        items = [item for item_id in state.pending_choices if (item := _menu_item(item_id))]
+        names = [fold_text(item.get("spoken_name_urdu") or "") for item in items]
+        if any(name and name not in folded for name in names):
+            question = build_item_choice_urdu(items)
+            if question not in reply:
+                return f"{reply} {question}".strip()
+        return reply
+    question = _pending_question(state)
+    if question and question not in reply:
+        return f"{reply} {question}".strip()
+    return reply
+
+
 def _pending_question(state: DialogState) -> str:
     from app.dialog import _choice_question, _menu_item, build_missing_size_urdu
     from app.replies import ASK_ADDRESS_URDU, ASK_CONFIRM_URDU, build_confirm_address_urdu
@@ -284,6 +318,12 @@ def run_agent_turn(
         state.summary_presented,
         state.pending_address,
     )
+    from app.agent_tools import bind_utterance, unmatched_words
+
+    utterance_token = bind_utterance(user_text)
+    found_unmatched = unmatched_words(user_text)
+    if found_unmatched:
+        trial_state.unmatched_words = found_unmatched
     previous_reply = state.last_reply
     budget = AdditionBudget()
     tools = tools_for_stage(state)
@@ -294,12 +334,23 @@ def run_agent_turn(
     mutation_ok = False
     mutation_failed = False
     code_reply = ""
+    code_line = False
     repeat_requested = False
     reason = ""
     final_text = ""
     validation = ""
+    released = False
+
+    def release() -> None:
+        nonlocal released
+        if released:
+            return
+        released = True
+        from app.agent_tools import _UTTERANCE
+        _UTTERANCE.reset(utterance_token)
 
     def fail(why: str) -> AgentOutcome:
+        release()
         detail = trial_state.last_basket_edit_detail if trial_state.last_basket_edit_detail.startswith("rejected=") else ""
         outcome = AgentOutcome(
             ok=False,
@@ -351,6 +402,8 @@ def run_agent_turn(
                     mutation_failed = True
                 if tool_result.get("speak"):
                     code_reply = str(tool_result["speak"])
+                if tool_result.get("ok") and tool_result.get("code_line"):
+                    code_line = True
                 if call.name == "repeat_last" and tool_result.get("ok"):
                     repeat_requested = True
                 messages.append({
@@ -358,10 +411,13 @@ def run_agent_turn(
                     "_tool_call_id": call.id,
                     "content": json.dumps(tool_result, ensure_ascii=False),
                 })
-            if code_reply and any(entry["name"] in {"transfer_to_human", "request_cancel"} for entry in tool_log):
+            if code_line or (code_reply and any(entry["name"] in {"transfer_to_human", "request_cancel"} for entry in tool_log)):
                 final_text = code_reply
                 break
-        if code_reply and trial_state.stage == DialogStage.HANDOFF:
+        if code_line:
+            reply = code_reply
+            validation = "ok"
+        elif code_reply and trial_state.stage == DialogStage.HANDOFF:
             reply = code_reply
             validation = "ok"
         elif code_reply and trial_state.stage == DialogStage.AWAITING_CANCEL_CONFIRM:
@@ -371,21 +427,17 @@ def run_agent_turn(
             reply = code_reply
             validation = "ok"
             if shadow:
+                release()
                 return AgentOutcome(
                     ok=False, reply=reply, reason="shadow", rounds=rounds, tool_log=tool_log,
                     final_text=reply, validation="ok", latency=time.perf_counter() - started, applied=False,
                 )
+            release()
             return AgentOutcome(
                 ok=True, reply=reply, order=order, state=state, text_only=True, rounds=rounds,
                 tool_log=tool_log, final_text=reply, validation="ok",
                 latency=time.perf_counter() - started, applied=True,
             )
-        elif trial_state.stage == DialogStage.AWAITING_SIZE and trial_state.pending_item_id and started_stage != DialogStage.AWAITING_SIZE:
-            from app.dialog import _menu_item, _merge_parsed_additions, build_missing_size_urdu
-            _merge_parsed_additions(user_text, trial_order, trial_state)
-            item = _menu_item(trial_state.pending_item_id)
-            reply = build_missing_size_urdu(item) if item else code_reply
-            validation = "ok"
         elif repeat_requested and not mutation_ok:
             if not previous_reply.strip():
                 return fail("empty")
@@ -424,9 +476,7 @@ def run_agent_turn(
                         trial_state.summary_presented = started_pending[8]
                         trial_state.pending_address = started_pending[9]
                         trial_state.stage = started_stage
-                        question = _pending_question(trial_state)
-                        if question:
-                            reply = f"{reply} {question}"
+                        reply = _append_slot_question(reply, final_text, trial_state)
                     elif mutation_ok:
                         from app.dialog import _reread_confirmation
                         from app.replies import build_update_reply_urdu
@@ -438,6 +488,7 @@ def run_agent_turn(
                         reply = _with_total_and_close(reply, final_text, user_text, trial_order, trial_state)
                     elif trial_state.stage == DialogStage.AWAITING_MORE_ITEMS:
                         reply = _append_more_items(reply, final_text)
+                    reply = _append_slot_question(reply, final_text, trial_state)
     except AgentAbort as exc:
         return fail(exc.reason)
     except LLMTimeoutError:
@@ -447,6 +498,7 @@ def run_agent_turn(
     except Exception:
         return fail("model_error")
 
+    release()
     if shadow:
         return AgentOutcome(
             ok=False,

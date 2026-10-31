@@ -1593,6 +1593,16 @@ def _food_repeat_reply(state: DialogState, question: str) -> str:
 
 
 def _current_food_question(order: Order, state: DialogState) -> str:
+    if state.stage == DialogStage.AWAITING_CANCEL_CONFIRM:
+        return ASK_CANCEL_CONFIRM_URDU
+    if state.stage == DialogStage.AWAITING_CONFIRMATION:
+        return ASK_CONFIRM_URDU
+    if state.stage == DialogStage.AWAITING_ADDRESS:
+        return ASK_ADDRESS_URDU
+    if state.stage == DialogStage.AWAITING_ADDRESS_CONFIRMATION and state.pending_address:
+        return build_confirm_address_urdu(state.pending_address)
+    if state.pending_choices:
+        return _choice_question(state)
     if state.pending_item_id and (item := _menu_item(state.pending_item_id)):
         return build_missing_size_urdu(item)
     if state.stage == DialogStage.AWAITING_MORE_ITEMS and order.items:
@@ -1688,6 +1698,7 @@ def _commit_agent_trial(order: Order, state: DialogState, trial_order: Order, tr
     order.items = trial_order.items
     order.delivery_address = trial_order.delivery_address
     order.special_instructions = trial_order.special_instructions
+    order.complaint = trial_order.complaint
     order.customer_phone = trial_order.customer_phone
     order.status = trial_order.status
     for name in type(trial_state).model_fields:
@@ -1753,6 +1764,10 @@ def _chat_turn_hybrid(
             user_message, order, messages, state, intent, None, HUMAN_HANDOFF_URDU, False,
         )
 
+    if config.TOOL_AGENT_ENABLED and not compare_tokens(user_message):
+        messages.append({"role": "assistant", "content": ASK_CLARIFY_URDU})
+        return ASK_CLARIFY_URDU, order, messages, False
+
     _AMBIGUOUS_LLM_ALLOWED.set(True)
     parser_start = time.perf_counter()
     intent = parse_customer_intent(user_message, state, order)
@@ -1762,14 +1777,59 @@ def _chat_turn_hybrid(
         return _finish_hybrid_turn(
             user_message, order, messages, state, intent, None, ASK_CLARIFY_URDU, False,
         )
-    if state.stage == DialogStage.AWAITING_CANCEL_CONFIRM:
+    if state.stage == DialogStage.AWAITING_CANCEL_CONFIRM and not config.TOOL_AGENT_ENABLED:
         reply, complete = _cancel_confirmation_reply(user_message, order, state)
         return _finish_hybrid_turn(
             user_message, order, messages, state, intent, None, reply, complete,
         )
     local_first = _agent_local_first(user_message, state, intent, confirmation)
     use_today_model = True
-    if _agent_should_run(state) and not local_first:
+    delegate_to_script = True
+    if config.TOOL_AGENT_ENABLED and _agent_should_run(state):
+        from app.agent_loop import run_agent_turn
+
+        delegate_to_script = False
+        use_today_model = False
+        outcome = run_agent_turn(user_message, order, state)
+        _log_agent_turn(user_message, state, intent, outcome, "agent" if outcome.ok else "fallback")
+        state.last_llm_seconds = outcome.latency
+        api_failure = outcome.reason in {"timeout", "model_error", "deadline"}
+        if outcome.ok and outcome.applied:
+            if outcome.order is not None and outcome.order is not order and outcome.state is not None:
+                _commit_agent_trial(order, state, outcome.order, outcome.state)
+            state.last_path = "agent"
+            state.agent_failure_streak = 0
+            return _finish_hybrid_turn(
+                user_message, order, messages, state, intent, None, outcome.reply,
+                order.status == OrderStatus.CONFIRMED,
+                agent_text_only=outcome.text_only,
+            )
+        if api_failure:
+            state.agent_failure_streak += 1
+            if state.agent_failure_streak >= 3:
+                state.agent_failure_streak = 0
+                state.reply_streak = 0
+                state.unmatched_words = []
+                state.stage = DialogStage.HANDOFF
+                return _finish_hybrid_turn(
+                    user_message, order, messages, state, intent, None, HUMAN_HANDOFF_URDU, False,
+                )
+            if _bare_slot_reply(user_message):
+                delegate_to_script = True
+            else:
+                reply = _food_repeat_reply(state, _current_food_question(order, state))
+                return _finish_hybrid_turn(
+                    user_message, order, messages, state, intent, None, reply, False,
+                    keep_food_repeat=True,
+                )
+        else:
+            state.agent_failure_streak = 0
+            reply = _food_repeat_reply(state, _current_food_question(order, state))
+            return _finish_hybrid_turn(
+                user_message, order, messages, state, intent, None, reply, False,
+                keep_food_repeat=True,
+            )
+    elif _agent_should_run(state) and not local_first:
         from app.agent_loop import run_agent_turn
 
         if config.TOOL_AGENT_ENABLED:
@@ -1857,6 +1917,12 @@ def _chat_turn_hybrid(
         reply, complete = address_result
         return _finish_hybrid_turn(
             user_message, order, messages, state, intent, model_decision, reply, complete,
+        )
+
+    if state.stage == DialogStage.AWAITING_CANCEL_CONFIRM:
+        reply, complete = _cancel_confirmation_reply(user_message, order, state)
+        return _finish_hybrid_turn(
+            user_message, order, messages, state, intent, None, reply, complete,
         )
 
     for handler in (_handle_order_change_turn, _handle_order_confirmation_turn):

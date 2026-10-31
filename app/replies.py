@@ -22,6 +22,7 @@ ASK_CANCEL_CONFIRM_URDU = "کیا آپ یہ آرڈر ختم کرنا چاہتے 
 FACT_UNKNOWN_URDU = "یہ معلومات موجود نہیں"
 HUMAN_HANDOFF_URDU = "معذرت، میں پتہ واضح نہیں سمجھ سکی۔ براہ کرم عملے سے رابطہ کریں۔"
 HUMAN_HANDOFF_CONFIRM_URDU = "معذرت، آرڈر کی تصدیق نہیں ہو سکی۔ آپ کو ہمارے نمائندے سے ملایا جا رہا ہے۔"
+COMPLAINT_NOTED_URDU = "آپ کی شکایت نوٹ کر لی گئی ہے۔"
 
 
 def _line_spoken(item) -> str:
@@ -50,6 +51,8 @@ def build_verified_summary_urdu(
 
     if order.special_instructions:
         parts.append(f"ہدایات {order.special_instructions}۔")
+    if order.complaint:
+        parts.append(COMPLAINT_NOTED_URDU)
 
     if ask_for_confirmation and order.items and order.delivery_address:
         parts.append(ASK_CONFIRM_URDU)
